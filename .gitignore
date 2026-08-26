@@ -11,3 +11,6 @@ historial.jsonl
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# La ventana compilada: se genera con ventana/construir.sh, no se versiona.
+MacDiag.app/

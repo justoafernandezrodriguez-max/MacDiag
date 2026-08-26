@@ -492,10 +492,12 @@ PCT="$(dato disco.ocupado_pct)"
 if es_numero "$PCT"; then
     if [ "$PCT" -ge 90 ]; then
         hallazgo "CRITICO" "DISCO" "El disco esta al $PCT %" \
-            "Por debajo del 10 % libre macOS empieza a ir peor y algunas cosas dejan de poder guardarse. Mas abajo esta lo que se podria liberar sin tocar nada tuyo."
+            "Por debajo del 10 % libre macOS empieza a ir peor y algunas cosas dejan de poder guardarse. La pestana de Mantenimiento dice cuanto se puede liberar sin tocar nada tuyo." \
+            "abrir:almacenamiento"
     elif [ "$PCT" -ge 75 ]; then
         hallazgo "AVISO" "DISCO" "El disco esta al $PCT %" \
-            "Todavia no molesta, pero conviene mirar lo que se podria liberar antes de que llegue al 90 %."
+            "Todavia no molesta, pero conviene mirar lo que se podria liberar antes de que llegue al 90 %." \
+            "abrir:almacenamiento"
     fi
 fi
 
@@ -520,7 +522,8 @@ fi
 
 case "$(dato seg.filevault)" in
     *"is Off"*) hallazgo "AVISO" "SEGURIDAD" "FileVault esta apagado" \
-        "El disco no esta cifrado: quien se lleve el equipo, o el disco, puede leerlo todo sin saber tu contraseña. En un portatil es lo primero que hay que encender." ;;
+        "El disco no esta cifrado: quien se lleve el equipo, o el disco, puede leerlo todo sin saber tu contraseña. En un portatil es lo primero que hay que encender." \
+        "abrir:filevault" ;;
 esac
 
 case "$SIP" in
@@ -530,7 +533,8 @@ esac
 
 case "$(dato seg.gatekeeper)" in
     *disabled*) hallazgo "AVISO" "SEGURIDAD" "Gatekeeper esta desactivado" \
-        "El Mac deja de comprobar de donde vienen los programas antes de abrirlos." ;;
+        "El Mac deja de comprobar de donde vienen los programas antes de abrirlos." \
+        "gatekeeper" ;;
 esac
 
 if [ "$(dato fallos.puedo_leer)" = "si" ]; then
@@ -544,7 +548,8 @@ fi
 AP="$(dato act.pendientes)"
 if es_numero "$AP" && [ "$AP" -gt 0 ]; then
     hallazgo "AVISO" "SISTEMA" "Hay $AP actualizacion(es) de Apple sin instalar" \
-        "Las de seguridad de macOS no son opcionales en la practica. Se instalan desde Ajustes del Sistema, en Actualizacion de software."
+        "Las de seguridad de macOS no son opcionales en la practica. MacDiag no las instala solo: eso lo tiene que hacer una persona, porque a veces piden reiniciar." \
+        "abrir:actualizaciones"
 fi
 
 # Las copias de seguridad, sobre el texto y no sobre el codigo de salida (ver
@@ -554,7 +559,8 @@ fi
 case "$TM_ESTADO" in
     "sin destino")
         hallazgo "AVISO" "COPIAS" "Este Mac no tiene ningun destino de Time Machine" \
-            "No hay copia de seguridad automatica. Un disco externo de los baratos y encenderlo es todo lo que hace falta; sin eso, un disco roto se lo lleva todo." ;;
+            "No hay copia de seguridad automatica. Un disco externo de los baratos y encenderlo es todo lo que hace falta; sin eso, un disco roto se lo lleva todo." \
+            "abrir:timemachine" ;;
     "con destino")
         if [ -z "$TM_ULTIMA" ]; then
             no_pude "Cuando fue la ultima copia de Time Machine" \

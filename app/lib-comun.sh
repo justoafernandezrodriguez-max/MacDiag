@@ -18,7 +18,7 @@
 
 # La version va en UN solo sitio, y este es el sitio. Es la leccion de PCDIAG:
 # el dia que el numero vive en tres ficheros, se actualizan dos.
-VERSION_MACDIAG="0.2.0"
+VERSION_MACDIAG="0.3.0"
 
 # ---------------------------------------------------------------------------
 # Decir cosas por pantalla
@@ -182,8 +182,20 @@ datos_ordenados() {
 # privacidad. Meterlas en el mismo saco haria que la aplicacion dijera que
 # todo esta bien cuando lo que pasa es que no ha podido mirar.
 # ---------------------------------------------------------------------------
-hallazgo() {   # gravedad(CRITICO|AVISO|INFO)  etiqueta  titulo  detalle
-    printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >> "$HALLAZGOS"
+# hallazgo <gravedad> <etiqueta> <titulo> <detalle> [accion]
+#
+# El quinto campo es la columna "Lo arregla" de PCDIAG, y en macOS hace mas
+# falta todavia que en Windows: hay cosas que NINGUN programa puede hacer por
+# su cuenta -encender FileVault, instalar una actualizacion del sistema- porque
+# el propio macOS no lo permite sin una persona delante.
+#
+# Sin esa distincion pasa lo que paso en PCDIAG: alguien pulsa "Reparar", no
+# ocurre nada visible, y concluye que la aplicacion no sirve. Con ella, lo que
+# no puede arreglarse solo se dice y se lleva al usuario al sitio exacto.
+#
+# Vacio = no hay nada que MacDiag pueda hacer, solo informar.
+hallazgo() {
+    printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "${5:-}" >> "$HALLAZGOS"
 }
 
 no_pude() {    # que  por-que

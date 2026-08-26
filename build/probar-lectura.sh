@@ -413,6 +413,41 @@ comprobar "y Chip esta vacio, que es lo que dispara el respaldo" \
 comprobar "el identificador del modelo" "iMac18,3" "$(campo_sp "$CRUDO/hw_real.txt" "Model Identifier")"
 
 # ---------------------------------------------------------------------------
+printf '\n== La columna "Lo arregla"\n'
+# ---------------------------------------------------------------------------
+#
+# En macOS hay cosas que NINGUN programa puede hacer solo: encender FileVault o
+# instalar una actualizacion exigen una persona. Si el informe no distingue eso,
+# alguien pulsa "Reparar", no pasa nada visible, y concluye que no sirve. Es la
+# leccion que PCDIAG pago con su columna "Lo arregla".
+: > "$HALLAZGOS"
+hallazgo "AVISO"   "SEGURIDAD" "FileVault esta apagado"  "detalle" "abrir:filevault"
+hallazgo "AVISO"   "SEGURIDAD" "Gatekeeper desactivado"  "detalle" "gatekeeper"
+hallazgo "INFO"    "ESPACIO"   "Descargas ocupa mucho"   "detalle"
+
+comprobar "el hallazgo guarda su accion" \
+    "abrir:filevault" "$(awk -F'\t' 'NR==1{print $5}' "$HALLAZGOS")"
+comprobar "una accion automatica se guarda igual" \
+    "gatekeeper" "$(awk -F'\t' 'NR==2{print $5}' "$HALLAZGOS")"
+comprobar "un hallazgo sin arreglo deja el campo vacio" \
+    "" "$(awk -F'\t' 'NR==3{print $5}' "$HALLAZGOS")"
+
+escribir_html "$TRABAJO/acciones.html"
+contiene "el informe dice cuando lo hace el usuario" "$TRABAJO/acciones.html" "Lo tienes que hacer tu"
+contiene "y cuando lo hace MacDiag"                  "$TRABAJO/acciones.html" "Lo arregla MacDiag"
+contiene "y cuando no lo arregla nadie"              "$TRABAJO/acciones.html" "no lo arregla un programa"
+
+escribir_json "$TRABAJO/acciones.json"
+contiene "el JSON lleva la accion"        "$TRABAJO/acciones.json" '"accion": "abrir:filevault"'
+contiene "y la vacia se escribe vacia"    "$TRABAJO/acciones.json" '"accion": ""'
+
+# Un hallazgo de cuatro campos -de una version anterior- no puede reventar la
+# lectura: el quinto simplemente no esta.
+printf 'AVISO\tVIEJO\tSin quinto campo\tdetalle\n' > "$HALLAZGOS"
+escribir_html "$TRABAJO/viejo.html"
+contiene "un hallazgo antiguo de 4 campos se sigue leyendo" "$TRABAJO/viejo.html" "Sin quinto campo"
+
+# ---------------------------------------------------------------------------
 printf '\n== Un informe VACIO, que es el caso que siempre se olvida\n'
 DATOS="$TRABAJO/datos2.tsv"; HALLAZGOS="$TRABAJO/hall2.tsv"; NOPUDE="$TRABAJO/nop2.tsv"
 : > "$DATOS"; : > "$HALLAZGOS"; : > "$NOPUDE"

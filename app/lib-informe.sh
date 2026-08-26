@@ -71,6 +71,7 @@ th { width:38%; font-weight:500; color:var(--flojo); }
 tr:last-child th, tr:last-child td { border-bottom:none; }
 .nose { color:var(--ambar); font-style:italic; }
 .nota { color:var(--flojo); font-size:14px; }
+.quien { display:block; margin-top:6px; font-size:12px; color:var(--azul); }
 .aviso-grande { background:#fff8e5; border:1px solid #e6cf8b; border-radius:10px;
                 padding:14px 16px; margin:18px 0; font-size:14px; }
 .tabla-scroll { overflow-x:auto; }
@@ -110,10 +111,16 @@ CAJA
         if [ -s "$HALLAZGOS" ]; then
             printf '<h2>Lo que conviene mirar</h2>\n'
             for g in CRITICO AVISO INFO; do
-                while IFS=$'\t' read -r gr et ti de; do
+                while IFS=$'\t' read -r gr et ti de ac; do
                     [ "$gr" = "$g" ] || continue
-                    printf '<div class="h %s"><b><span class="tag">%s</span>%s</b><p>%s</p></div>\n' \
-                        "$gr" "$(esc_html "$et")" "$(esc_html "$ti")" "$(esc_html "$de")"
+                    quien=""
+                    case "$ac" in
+                        "")        quien='<span class="quien">Esto no lo arregla un programa: es informacion.</span>' ;;
+                        abrir:*)   quien='<span class="quien">Lo tienes que hacer tu: MacDiag te lleva al sitio.</span>' ;;
+                        *)          quien='<span class="quien">Lo arregla MacDiag.</span>' ;;
+                    esac
+                    printf '<div class="h %s"><b><span class="tag">%s</span>%s</b><p>%s</p>%s</div>\n' \
+                        "$gr" "$(esc_html "$et")" "$(esc_html "$ti")" "$(esc_html "$de")" "$quien"
                 done < "$HALLAZGOS"
             done
         else
@@ -298,11 +305,11 @@ escribir_json() {
         printf '  "hallazgos": [\n'
         primera=1
         if [ -s "$HALLAZGOS" ]; then
-            while IFS=$'\t' read -r gr et ti de; do
+            while IFS=$'\t' read -r gr et ti de ac; do
                 [ -n "$gr" ] || continue
                 [ "$primera" -eq 1 ] || printf ',\n'
-                printf '    { "gravedad": "%s", "etiqueta": "%s", "titulo": "%s", "detalle": "%s" }' \
-                    "$(esc_json "$gr")" "$(esc_json "$et")" "$(esc_json "$ti")" "$(esc_json "$de")"
+                printf '    { "gravedad": "%s", "etiqueta": "%s", "titulo": "%s", "detalle": "%s", "accion": "%s" }' \
+                    "$(esc_json "$gr")" "$(esc_json "$et")" "$(esc_json "$ti")" "$(esc_json "$de")" "$(esc_json "$ac")"
                 primera=0
             done < "$HALLAZGOS"
         fi

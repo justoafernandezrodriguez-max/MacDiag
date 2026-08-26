@@ -4,8 +4,15 @@ Una aplicación suelta que dice cómo está un Mac y le hace el mantenimiento
 razonable, dejando un informe y un historial. Para cualquier Mac: el portátil
 de alguien, el de la oficina, el de casa.
 
-No hace falta instalar nada. Todo son scripts de `bash`, que es lo que ya trae
-macOS.
+Desde la 0.3.0 tiene **ventana propia**: se abre con doble clic y tiene tres
+secciones — estado del equipo, mantenimiento e informes — con sus botones.
+
+No hace falta instalar nada de fuera. Los motores son scripts de `bash`, que es
+lo que ya trae macOS, y la ventana se compila con el `swiftc` de las Command
+Line Tools (`bash ventana/construir.sh`). Sin Xcode.
+
+**La ventana no es un motor nuevo:** lanza los mismos scripts y lee el mismo
+JSON, así que todo sigue funcionando desde la Terminal igual que antes.
 
 ---
 
