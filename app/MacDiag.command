@@ -9,7 +9,7 @@
 #  Asi, el dia que MacDiag tenga una ventana de verdad, se cambia esta pieza y
 #  el diagnostico no se toca. Al reves no funciona.
 #
-#  OJO: ESCRITO SIN PODER PROBARLO EN NINGUN MAC. Ver LEEME.txt.
+#  PROBADO en un iMac Intel con macOS 13.7.8. Ver LEEME.txt.
 # ---------------------------------------------------------------------------
 
 AQUI="$(cd "$(dirname "$0")" && pwd)"
@@ -56,14 +56,14 @@ ultimo_informe() {
 while true; do
     printf '\n'
     printf '  %sMacDiag %s%s\n' "$_C_FUERTE" "$VERSION_MACDIAG" "$_C_FIN"
-    printf '  %sVersion sin probar en ningun Mac. De momento solo mira: no borra nada.%s\n\n' "$_C_GRIS" "$_C_FIN"
+    printf '  %sProbada en un iMac Intel; no en Apple Silicon. Solo mira: no borra nada.%s\n\n' "$_C_GRIS" "$_C_FIN"
     printf '    1  Mirar como esta este Mac\n'
     printf '    2  Abrir el ultimo informe\n'
     printf '    3  Ver el historial\n'
     printf '    4  Abrir la carpeta de MacDiag\n'
     printf '\n'
     printf '    %s-  Limpiar y liberar espacio: todavia no. El informe te dice cuanto hay%s\n' "$_C_GRIS" "$_C_FIN"
-    printf '    %s   y donde, pero borrar no se activa hasta poder probarlo en un Mac.%s\n' "$_C_GRIS" "$_C_FIN"
+    printf '    %s   y donde, pero borrar espera a probarlo en mas de un equipo.%s\n' "$_C_GRIS" "$_C_FIN"
     printf '\n'
     printf '    0  Salir\n\n'
     printf '  Elige: '

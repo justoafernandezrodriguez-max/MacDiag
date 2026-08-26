@@ -9,17 +9,22 @@ macOS.
 
 ---
 
-## ⚠ La versión 0.1.0 no se ha ejecutado nunca
+## ⚠ La 0.2.0 ya se ha ejecutado en un Mac. En uno
 
-Se escribió entera desde un PC con Windows, sin ningún Mac delante. Puede haber
-datos mal leídos o mandos que no existan en tu versión de macOS.
+Probada el 26-ago-2026 en un **iMac18,3 con macOS 13.7.8 (Intel)**: terminó
+entera en 25 segundos, con 37 de 39 mandos correctos, y los cuatro fallos de
+lectura que aparecieron están corregidos.
+
+**Sigue sin probarse en un Mac con chip de Apple (M1 y siguientes) y en un
+portátil.** Eso segundo importa más de lo que parece: un sobremesa no tiene
+batería, así que **todo el bloque de la batería —la función más útil que tiene
+esta aplicación— no se ha llegado a ejecutar ni una vez.**
 
 **Lo que no puede pasar es que estropee nada: esta versión sólo lee.** No borra,
 no mueve, no cambia ningún ajuste y no pide contraseña de administrador. Los
 mandos que ejecuta salen todos listados al final del propio informe.
 
-Está así a propósito, y se busca justamente eso: **una primera ejecución en un
-Mac de verdad** para poder terminarla. Si la pruebas, mira
+Si la pruebas en un portátil o en un Apple Silicon, mira
 [qué devolver](#si-la-pruebas-qué-hace-falta-de-vuelta).
 
 ---

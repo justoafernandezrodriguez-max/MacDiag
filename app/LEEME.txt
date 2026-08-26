@@ -1,20 +1,24 @@
-MacDiag 0.1.0 - como esta tu Mac
+MacDiag 0.2.0 - como esta tu Mac
 =================================
 
 LO PRIMERO, Y VA EN SERIO
 -------------------------
 
-Esta version SE ESCRIBIO SIN NINGUN MAC DELANTE, desde un PC con Windows. No se
-ha ejecutado nunca. Puede que algun dato salga mal leido, o que algun mando no
-exista en tu version de macOS.
+Esta version ya se ha ejecutado en un Mac, pero SOLO EN UNO: un iMac con
+procesador Intel y macOS 13.7.8. Alli funciono entera.
+
+NO se ha probado todavia en un Mac con chip de Apple (M1 y siguientes) ni en un
+portatil. Si el tuyo es uno de esos, puede que algun dato salga mal leido, y los
+de la bateria son los mas probables: un iMac no tiene bateria, asi que esa parte
+no se ha llegado a ejecutar ni una vez.
 
 Lo que NO puede pasar es que estropee nada: esta version solo LEE. No borra, no
 mueve, no cambia ningun ajuste y no pide contraseña de administrador. Los
 mandos que ejecuta salen todos listados al final del propio informe para que
 cualquiera pueda comprobarlo.
 
-Por eso se te pide que la pruebes: hace falta una primera ejecucion en un Mac
-de verdad para poder terminarla.
+Por eso se te sigue pidiendo que la pruebes si tu Mac es un portatil o lleva
+chip de Apple: son los dos casos que faltan por ver.
 
 
 COMO SE LANZA
@@ -109,7 +113,8 @@ QUE NO HACE, Y NO ES QUE FALTE
 ------------------------------
 
   - NO borra nada. Ni siquiera se ofrece: el codigo que borra ficheros no se
-    publica sin haberlo ejecutado antes en un Mac de verdad.
+    publica hasta haberlo probado en varios Mac, y de momento solo se ha
+    ejecutado en uno.
   - NO "repara permisos". Eso desaparecio de macOS en 2015 y cualquier programa
     que hoy lo ofrezca esta fingiendo.
   - NO libera memoria RAM. La memoria que macOS tiene en cache es memoria bien

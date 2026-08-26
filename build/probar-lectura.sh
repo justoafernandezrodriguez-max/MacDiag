@@ -7,10 +7,14 @@
 #  no se ha podido probar. La otra mitad -la que lee texto y pinta el informe-
 #  es texto puro y se puede probar en cualquier sitio con bash.
 #
-#  Las capturas de aqui abajo estan escritas a mano imitando la salida real de
-#  cada mando. Eso quiere decir que esta prueba demuestra que la lectura
-#  funciona SI la salida es asi; no demuestra que la salida sea asi. Lo segundo
-#  solo lo dice un Mac.
+#  Las capturas de la primera mitad estan escritas a mano imitando la salida
+#  real de cada mando: demuestran que la lectura funciona SI la salida es asi,
+#  no que la salida sea asi.
+#
+#  Las de la seccion "Lo que salio torcido en el primer Mac de verdad" son otra
+#  cosa: son la salida LITERAL de un iMac18,3 con macOS 13.7.8, copiadas de la
+#  carpeta "crudo" de la primera ejecucion real. Cada una es un fallo que la
+#  0.1.0 tenia y que ninguna prueba escrita a mano habia cazado.
 #
 #      bash build/probar-lectura.sh
 # ---------------------------------------------------------------------------
@@ -205,7 +209,8 @@ escribir_json "$TRABAJO/informe.json"
 anotar_historial "$TRABAJO/historial.jsonl"
 
 contiene    "el HTML se ha escrito"          "$TRABAJO/informe.html" "<title>MacDiag"
-contiene    "sale el aviso de sin probar"    "$TRABAJO/informe.html" "no se ha podido probar en ningun Mac"
+contiene "el informe dice que solo se probo en un Mac" "$TRABAJO/informe.html" "solo en uno"
+contiene "y dice que en Apple Silicon no"              "$TRABAJO/informe.html" "chip de Apple"
 contiene    "sale el nombre del equipo"      "$TRABAJO/informe.html" "Mac de Justo"
 contiene    "sale un hallazgo critico"       "$TRABAJO/informe.html" "detalle uno"
 contiene    "sale lo que no se ha podido"    "$TRABAJO/informe.html" "Acceso total al disco"
@@ -220,7 +225,8 @@ PRIMER=$(grep -o 'class="h [A-Z]*"' "$TRABAJO/informe.html" | head -1 | sed 's/.
 comprobar "el primer hallazgo es critico" "CRITICO" "$PRIMER"
 
 contiene "el JSON se ha escrito"        "$TRABAJO/informe.json" '"app": "MacDiag"'
-contiene "el JSON dice que no se probo" "$TRABAJO/informe.json" '"sin_probar_en_mac": true'
+contiene "el JSON dice donde se ha probado" "$TRABAJO/informe.json" '"probado_en_mac": true'
+contiene "y dice donde NO se ha probado"    "$TRABAJO/informe.json" '"sin_probar_en": "Apple Silicon'
 contiene "el JSON lleva los hallazgos"  "$TRABAJO/informe.json" '"gravedad": "CRITICO"'
 contiene "el historial se ha escrito"   "$TRABAJO/historial.jsonl" '"equipo": "Mac de Justo"'
 
@@ -235,32 +241,176 @@ contiene "el historial se ha escrito"   "$TRABAJO/historial.jsonl" '"equipo": "M
 # FUNCIONA. Y si no hay ninguno, decir que no se ha comprobado en vez de dar
 # por buena la comprobacion.
 #
-# En un Mac siempre hay plutil, asi que alli esto no se salta nunca.
-validador_json=""
-if plutil -lint /dev/null >/dev/null 2>&1 || [ -x /usr/bin/plutil ]; then
-    validador_json="plutil"
-elif python3 -c "pass" >/dev/null 2>&1; then
-    validador_json="python3"
-elif python -c "pass" >/dev/null 2>&1; then
-    validador_json="python"
-fi
+# Y la trampa volvio a morder en el primer Mac, con otro disfraz: se elegia
+# "plutil" mirando si el fichero existe -[ -x /usr/bin/plutil ]-, que es
+# EXACTAMENTE preguntar si esta en vez de si funciona, dos lineas debajo de
+# haberlo escrito. Y ademas "plutil -lint" NO valida JSON: autodetecta property
+# lists y contesta "Unexpected character { at line 1" ante un JSON perfecto.
+# Resultado: 49 pruebas bien y una que decia "el JSON NO es valido" con el JSON
+# impecable, igual que en Windows.
+#
+# Asi que ahora el validador no se elige: se EXAMINA. Cada candidato tiene que
+# aprobar un JSON bueno Y suspender uno roto. El que no haga las dos cosas no
+# vale, aunque exista y aunque no de error.
+_bueno="$TRABAJO/_val_bueno.json"; _roto="$TRABAJO/_val_roto.json"
+printf '{ "a": [1, 2], "b": "x" }\n' > "$_bueno"
+printf '{ "a": 1,, }\n' > "$_roto"
 
-case "$validador_json" in
-    plutil)
-        if plutil -lint "$TRABAJO/informe.json" >/dev/null 2>&1; then
-            BIEN=$(( BIEN + 1 )); printf '  ok    el JSON es valido (plutil)\n'
-        else
-            MAL=$(( MAL + 1 )); printf '  MAL   el JSON NO es valido (plutil)\n'
-        fi ;;
-    python3|python)
-        if "$validador_json" -c "import json,sys; json.load(open(sys.argv[1]))" "$TRABAJO/informe.json" >/dev/null 2>&1; then
-            BIEN=$(( BIEN + 1 )); printf '  ok    el JSON es valido (%s)\n' "$validador_json"
-        else
-            MAL=$(( MAL + 1 )); printf '  MAL   el JSON NO es valido (%s)\n' "$validador_json"
-        fi ;;
-    *)
-        printf '  --    sin plutil ni python que funcione: la validez del JSON se queda SIN COMPROBAR\n' ;;
-esac
+# "plutil -convert" si lee JSON de entrada; se tira a /dev/null porque solo
+# interesa si lo acepta. json_pp viene con el Perl de macOS. python3 va el
+# ultimo porque en un Mac limpio es el anzuelo de las herramientas de Xcode.
+validador_json=""; validador_nombre=""
+for cand in "plutil:plutil -convert xml1 -o /dev/null" "json_pp:json_pp" "python3:python3 -c import-json"; do
+    nom="${cand%%:*}"
+    case "$nom" in
+        plutil)  _prueba() { plutil -convert xml1 -o /dev/null "$1" >/dev/null 2>&1; } ;;
+        json_pp) _prueba() { json_pp < "$1" >/dev/null 2>&1; } ;;
+        python3) _prueba() { python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$1" >/dev/null 2>&1; } ;;
+    esac
+    if _prueba "$_bueno" && ! _prueba "$_roto"; then
+        validador_json="$nom"; validador_nombre="$nom"; break
+    fi
+done
+
+if [ -n "$validador_json" ]; then
+    case "$validador_json" in
+        plutil)  _prueba() { plutil -convert xml1 -o /dev/null "$1" >/dev/null 2>&1; } ;;
+        json_pp) _prueba() { json_pp < "$1" >/dev/null 2>&1; } ;;
+        python3) _prueba() { python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$1" >/dev/null 2>&1; } ;;
+    esac
+    if _prueba "$TRABAJO/informe.json"; then
+        BIEN=$(( BIEN + 1 )); printf '  ok    el JSON es valido (%s)\n' "$validador_nombre"
+    else
+        MAL=$(( MAL + 1 )); printf '  MAL   el JSON NO es valido (%s)\n' "$validador_nombre"
+    fi
+    if _prueba "$TRABAJO/historial.jsonl"; then
+        BIEN=$(( BIEN + 1 )); printf '  ok    la linea del historial es JSON valido\n'
+    else
+        MAL=$(( MAL + 1 )); printf '  MAL   la linea del historial NO es JSON valido\n'
+    fi
+else
+    printf '  --    ningun validador ha aprobado el examen: la validez del JSON se queda SIN COMPROBAR\n'
+fi
+rm -f "$_bueno" "$_roto"
+
+# ---------------------------------------------------------------------------
+printf '\n== Lo que salio torcido en el primer Mac de verdad\n'
+# ---------------------------------------------------------------------------
+#
+# ESTAS CAPTURAS NO ESTAN IMITADAS: son la salida literal de un iMac18,3 con
+# macOS 13.7.8, copiada de la carpeta "crudo" de la primera ejecucion real, el
+# 26-ago-2026. Por eso valen mas que todas las de arriba: las de arriba dicen
+# que la lectura funciona SI la salida es asi; estas dicen que funciona con la
+# salida que de verdad da un Mac.
+#
+# Cada una corresponde a un fallo que la 0.1.0 tenia y que solo se vio
+# ejecutandola. Estan aqui para que no vuelvan.
+
+# --- 1. Time Machine sin destino, y el mando termina BIEN --------------------
+# Escrito a ciegas se supuso que "destinationinfo" fallaba cuando no hay
+# destino. Termina con codigo 0. El aviso colgaba del fallo, asi que un Mac sin
+# copias de seguridad no recibia el aviso de que no tenia copias de seguridad.
+printf 'tmutil: No destinations configured.\n' > "$CRUDO/tm_destino.txt"
+comprobar "sin destino se lee del texto, no del codigo" \
+    "sin destino" "$(tm_estado_de "$CRUDO/tm_destino.txt")"
+
+# --- 2. "latestbackup" contesta con un error, tambien con codigo 0 -----------
+# Este churro se guardaba tal cual como "Ultima copia" en el informe.
+printf 'Failed to mount backup destination, error: Error Domain=com.apple.backupd.ErrorDomain Code=17 "Failed to mount destination." UserInfo={NSLocalizedDescription=Failed to mount destination.}\n' > "$CRUDO/tm_ultima.txt"
+comprobar "un error no se cuela como fecha de la ultima copia" \
+    "" "$(tm_ultima_de "$CRUDO/tm_ultima.txt")"
+
+# Y una copia de verdad si tiene que pasar.
+printf '/Volumes/Copias/Backups.backupdb/iMac/2026-08-20-031500\n' > "$CRUDO/tm_ultima.txt"
+comprobar "una copia de verdad si se lee" \
+    "/Volumes/Copias/Backups.backupdb/iMac/2026-08-20-031500" "$(tm_ultima_de "$CRUDO/tm_ultima.txt")"
+
+# Con destino configurado, que es el otro camino.
+cat > "$CRUDO/tm_destino.txt" <<'FIN'
+Name          : Copias
+Kind          : Local
+Mount Point   : /Volumes/Copias
+ID            : 6A1B2C3D-4E5F-6789-ABCD-EF0123456789
+FIN
+comprobar "con destino se distingue de sin destino" \
+    "con destino" "$(tm_estado_de "$CRUDO/tm_destino.txt")"
+comprobar "y se saca el nombre del destino" \
+    "Copias" "$(campo_sp "$CRUDO/tm_destino.txt" "Name")"
+
+# Un mando que no ha contestado nada no es "no hay copias": es "no se sabe".
+: > "$CRUDO/tm_destino.txt"
+comprobar "callarse no es decir que no hay destino" \
+    "no se sabe" "$(tm_estado_de "$CRUDO/tm_destino.txt")"
+
+# --- 3. "du" que da un total AUNQUE le hayan vetado carpetas -----------------
+# Salida literal de ~/Library/Caches en ese Mac: cuatro carpetas de privacidad
+# y, aun asi, un total. Se daba por "medido" y se enseñaba la cifra corta como
+# si fuera la buena.
+cat > "$CRUDO/du_caches.txt" <<'FIN'
+du: /Users/tecnicosplato/Library/Caches/com.apple.HomeKit: Operation not permitted
+du: /Users/tecnicosplato/Library/Caches/CloudKit: Operation not permitted
+du: /Users/tecnicosplato/Library/Caches/com.apple.homed: Operation not permitted
+du: /Users/tecnicosplato/Library/Caches/com.apple.ap.adprivacyd: Operation not permitted
+1651704	/Users/tecnicosplato/Library/Caches
+FIN
+comprobar "del du con errores se saca el total"      "1651704" "$(du_kb_de "$CRUDO/du_caches.txt")"
+comprobar "y se cuentan las carpetas vetadas"        "4"       "$(du_vetadas_de "$CRUDO/du_caches.txt")"
+comprobar "1651704 kB son 1,6 GB"                    "1.6"     "$(gb_de_kb "$(du_kb_de "$CRUDO/du_caches.txt")")"
+
+# --- 4. "du" que no da ningun total -----------------------------------------
+# La Papelera del mismo Mac. Aqui no hay cifra que enseñar, y el motivo tiene
+# que hablar de la Papelera: antes decia "en Descargas suele ser...".
+printf 'du: /Users/tecnicosplato/.Trash: Operation not permitted\n' > "$CRUDO/du_papelera.txt"
+comprobar "sin total, no se inventa un numero" "" "$(du_kb_de "$CRUDO/du_papelera.txt")"
+comprobar "y se sabe que fue por permisos"     "1" "$(du_vetadas_de "$CRUDO/du_papelera.txt")"
+
+# --- 5. Un du limpio sigue siendo limpio ------------------------------------
+printf '23120044\t/Users/tecnicosplato/Downloads\n' > "$CRUDO/du_descargas.txt"
+comprobar "un du sin errores no tiene vetadas" "0"        "$(du_vetadas_de "$CRUDO/du_descargas.txt")"
+comprobar "y da su total"                      "23120044" "$(du_kb_de "$CRUDO/du_descargas.txt")"
+
+# --- 6. El df real de un Mac con volumen sellado ----------------------------
+# Se comprueba con la tabla literal, incluida la linea de "map auto_home" y un
+# disco externo montado, que es donde una lectura descuidada se equivoca.
+cat > "$CRUDO/df_real.txt" <<'FIN'
+Filesystem     1024-blocks     Used  Available Capacity iused       ifree %iused  Mounted on
+/dev/disk1s4s1  1875136816  9126384 1769450340     1%  356882  4294309163    0%   /
+devfs                  190      190          0   100%     658           0  100%   /dev
+/dev/disk1s2    1875136816  1823180 1769450340     1%     899 17694503400    0%   /System/Volumes/Preboot
+/dev/disk1s6    1875136816 34604068 1769450340     2%      34 17694503400    0%   /System/Volumes/VM
+/dev/disk1s5    1875136816      408 1769450340     1%      18 17694503400    0%   /System/Volumes/Update
+/dev/disk1s1    1875136816 58717976 1769450340     4%  287567 17694503400    0%   /System/Volumes/Data
+map auto_home            0        0          0   100%       0           0  100%   /System/Volumes/Data/home
+/dev/disk2s1       1167320   858656     308664    74%    3670  4294963609    0%   /Volumes/Claude
+FIN
+comprobar "df: se coge el volumen de DATOS, no la raiz sellada" \
+    "1875136816 58717976 1769450340 4" "$(df_de "$CRUDO/df_real.txt" "/System/Volumes/Data")"
+comprobar "df: la raiz sellada casi no ocupa, y por eso no vale" \
+    "1875136816 9126384 1769450340 1" "$(df_de "$CRUDO/df_real.txt" "/")"
+comprobar "df: un disco externo no se confunde con el interno" \
+    "1167320 858656 308664 74" "$(df_de "$CRUDO/df_real.txt" "/Volumes/Claude")"
+
+# --- 7. Los datos reales de este Mac se leen enteros -------------------------
+cat > "$CRUDO/hw_real.txt" <<'FIN'
+Hardware:
+
+    Hardware Overview:
+
+      Model Name: iMac
+      Model Identifier: iMac18,3
+      Processor Name: Quad-Core Intel Core i7
+      Processor Speed: 4,2 GHz
+      Number of Processors: 1
+      Total Number of Cores: 4
+      Memory: 16 GB
+      Serial Number (system): (oculto)
+      Hardware UUID: (oculto)
+FIN
+comprobar "un Intel no tiene Chip, tiene Processor Name" \
+    "Quad-Core Intel Core i7" "$(campo_sp "$CRUDO/hw_real.txt" "Processor Name")"
+comprobar "y Chip esta vacio, que es lo que dispara el respaldo" \
+    "" "$(campo_sp "$CRUDO/hw_real.txt" "Chip")"
+comprobar "el identificador del modelo" "iMac18,3" "$(campo_sp "$CRUDO/hw_real.txt" "Model Identifier")"
 
 # ---------------------------------------------------------------------------
 printf '\n== Un informe VACIO, que es el caso que siempre se olvida\n'

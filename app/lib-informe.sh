@@ -9,7 +9,7 @@
 #  lo que permitira poner una ventana de verdad mas adelante sin tocar el
 #  diagnostico.
 #
-#  OJO: ESCRITO SIN PODER PROBARLO EN NINGUN MAC. Ver LEEME.txt.
+#  PROBADO en un iMac Intel con macOS 13.7.8. Ver LEEME.txt.
 # ---------------------------------------------------------------------------
 
 # Una fila de la tabla. Si el dato no esta, se dice que no se sabe: una celda
@@ -87,10 +87,11 @@ CABECERA
             "$(esc_html "$VERSION_MACDIAG")"
 
 cat <<'CAJA'
-<div class="aviso-grande"><b>Esta version de MacDiag no se ha podido probar en ningun Mac.</b>
-Se escribio desde un PC con Windows, asi que puede haber datos mal leidos o mandos que aqui no
-existan. Lo que <b>no</b> puede pasar es que cambie nada: esta version solo lee. Si algo se ve
-raro, la carpeta <code>crudo</code> que hay al lado de este informe lleva la salida original de
+<div class="aviso-grande"><b>Esta version ya se ha ejecutado en un Mac, pero solo en uno.</b>
+Se probo en un iMac con procesador Intel y macOS 13.7.8. <b>No</b> se ha probado todavia en un Mac
+con chip de Apple (M1 y siguientes) ni en un portatil, asi que la bateria y algun dato pueden salir
+mal leidos ahi. Lo que <b>no</b> puede pasar es que cambie nada: esta version solo lee. Si algo se
+ve raro, la carpeta <code>crudo</code> que hay al lado de este informe lleva la salida original de
 cada mando y sirve para arreglarlo.</div>
 CAJA
 
@@ -98,7 +99,11 @@ CAJA
         printf '<div class="kpi c"><div class="n">%s</div><div class="l">para mirar ya</div></div>' "$nC"
         printf '<div class="kpi a"><div class="n">%s</div><div class="l">avisos</div></div>' "$nA"
         printf '<div class="kpi o"><div class="n">%s</div><div class="l">%% del disco</div></div>' "$(dato disco.ocupado_pct)"
-        printf '<div class="kpi o"><div class="n">%s</div><div class="l">GB liberables</div></div>' "$(dato libera.total_gb)"
+        # El numero gordo es SOLO lo que sobra de verdad. Sumarle Descargas -que
+        # son ficheros del usuario- convertia este KPI en una invitacion a borrar
+        # lo que no habia que borrar.
+        _lib="$(dato libera.basura_gb)"; [ -n "$_lib" ] || _lib="$(dato libera.total_gb)"
+        printf '<div class="kpi o"><div class="n">%s</div><div class="l">GB que sobran</div></div>' "$_lib"
         printf '</div>\n'
 
         # --- Hallazgos, los peores arriba -----------------------------------
@@ -158,8 +163,20 @@ CAJA
         fila_html "FileVault (cifrado del disco)" "seg.filevault"
         fila_html "SIP (integridad del sistema)"  "seg.sip"
         fila_html "Gatekeeper"                    "seg.gatekeeper"
-        fila_html "Destino de Time Machine"       "tm.destino"
-        fila_html "Ultima copia"                  "tm.ultima"
+        # "No hay ningun destino" es un dato, no una casilla vacia. Antes esta fila
+        # decia "no se ha podido saber" en un Mac SIN copias configuradas, que es
+        # justo el equipo al que hay que avisarle.
+        case "$(dato tm.estado)" in
+            "sin destino")
+                printf '<tr><th>Destino de Time Machine</th><td>no hay ninguno configurado</td></tr>\n'
+                printf '<tr><th>Ultima copia</th><td>no hay copias: no hay donde hacerlas</td></tr>\n' ;;
+            "con destino")
+                fila_html "Destino de Time Machine" "tm.destino"
+                fila_html "Ultima copia"            "tm.ultima" ;;
+            *)
+                printf '<tr><th>Destino de Time Machine</th><td class="nose">no se ha podido saber</td></tr>\n'
+                printf '<tr><th>Ultima copia</th><td class="nose">no se ha podido saber</td></tr>\n' ;;
+        esac
         fila_html "Actualizaciones pendientes"    "act.pendientes"
         printf '</table>\n'
 
@@ -185,18 +202,38 @@ CAJA
 
         # --- Espacio ---------------------------------------------------------
         printf '<h2>Que se podria liberar</h2>\n<table>\n'
-        for c in papelera caches logs ios xcode simulador descargas; do
+        # Descargas NO va en esta lista: va en su propia tabla, debajo y con su
+        # explicacion. Mezclarlas hacia que 23 GB de ficheros del usuario
+        # aparecieran como si fueran basura del sistema.
+        for c in papelera caches logs ios xcode simulador; do
             et="$(dato "libera.$c.etiqueta")"
             [ -n "$et" ] || continue
             es="$(dato "libera.$c.estado")"
-            if [ "$es" = "medido" ]; then
-                printf '<tr><th>%s</th><td>%s GB</td></tr>\n' "$(esc_html "$et")" "$(esc_html "$(dato "libera.$c.gb")")"
-            else
-                printf '<tr><th>%s</th><td class="nose">%s</td></tr>\n' "$(esc_html "$et")" "$(esc_html "$es")"
-            fi
+            case "$es" in
+                "medido")
+                    printf '<tr><th>%s</th><td>%s GB</td></tr>\n' "$(esc_html "$et")" "$(esc_html "$(dato "libera.$c.gb")")" ;;
+                "medido en parte")
+                    printf '<tr><th>%s</th><td>%s GB <span class="nose">como minimo: macOS no ha dejado medir %s carpeta(s) de dentro</span></td></tr>\n' \
+                        "$(esc_html "$et")" "$(esc_html "$(dato "libera.$c.gb")")" "$(esc_html "$(dato "libera.$c.vetadas")")" ;;
+                *)
+                    printf '<tr><th>%s</th><td class="nose">%s</td></tr>\n' "$(esc_html "$et")" "$(esc_html "$es")" ;;
+            esac
         done
         printf '</table>\n'
-        printf '<p class="nota"><b>MacDiag todavia no borra nada.</b> Esta version solo mide, y es a proposito: el codigo que borra ficheros no se publica sin haberlo ejecutado en un Mac de verdad, y todavia no ha sido posible.</p>\n'
+        printf '<p class="nota"><b>MacDiag todavia no borra nada.</b> Esta version solo mide, y es a proposito: el codigo que borra ficheros no se publica hasta haberlo ejecutado en varios Mac, y de momento solo se ha probado en uno.</p>\n'
+
+        # --- Descargas, aparte y con su aviso -------------------------------
+        _des="$(dato libera.descargas.estado)"
+        if [ -n "$_des" ]; then
+            printf '<h2>Tu carpeta de Descargas</h2>\n<table>\n'
+            if [ "$_des" = "medido" ] || [ "$_des" = "medido en parte" ]; then
+                printf '<tr><th>Ocupa</th><td>%s GB</td></tr>\n' "$(esc_html "$(dato libera.descargas.gb)")"
+            else
+                printf '<tr><th>Ocupa</th><td class="nose">%s</td></tr>\n' "$(esc_html "$_des")"
+            fi
+            printf '</table>\n'
+            printf '<p class="nota">Va <b>aparte</b> y no cuenta como espacio liberable, a proposito: son ficheros tuyos y no basura del sistema. Suele ser de lo mas grande que se puede vaciar a mano, pero mirando antes lo que hay. Eso lo decides tu, no un programa.</p>\n'
+        fi
 
         # --- Lo que no se ha podido mirar ------------------------------------
         printf '<h2>Lo que NO se ha podido comprobar</h2>\n'
@@ -242,7 +279,9 @@ escribir_json() {
         printf '{\n'
         printf '  "app": "MacDiag",\n'
         printf '  "version": "%s",\n' "$(esc_json "$VERSION_MACDIAG")"
-        printf '  "sin_probar_en_mac": true,\n'
+        printf '  "probado_en_mac": true,\n'
+        printf '  "probado_en": "iMac18,3 - macOS 13.7.8 - Intel x86_64",\n'
+        printf '  "sin_probar_en": "Apple Silicon, portatiles con bateria",\n'
         printf '  "criticos": %s,\n' "$(cuantos_hallazgos CRITICO)"
         printf '  "avisos": %s,\n'   "$(cuantos_hallazgos AVISO)"
 
@@ -304,14 +343,20 @@ escribir_json() {
 anotar_historial() {
     local fichero="$1"
     mkdir -p "$(dirname "$fichero")" 2>/dev/null
-    printf '{ "fecha": "%s", "version": "%s", "equipo": "%s", "criticos": %s, "avisos": %s, "disco_pct": "%s", "liberable_gb": "%s", "carpeta": "%s" }\n' \
+    # "liberable_gb" es SOLO lo que sobra de verdad. Si le sumara la carpeta de
+    # Descargas, la serie del historial subiria y bajaria con lo que el usuario
+    # se descarga, que no tiene nada que ver con si el Mac esta mejor o peor.
+    # Descargas va en su propio campo para poder mirarla aparte.
+    printf '{ "fecha": "%s", "version": "%s", "equipo": "%s", "criticos": %s, "avisos": %s, "disco_pct": "%s", "liberable_gb": "%s", "descargas_gb": "%s", "medida_incompleta": "%s", "carpeta": "%s" }\n' \
         "$(esc_json "$(dato meta.fecha)")" \
         "$(esc_json "$VERSION_MACDIAG")" \
         "$(esc_json "$(dato meta.equipo)")" \
         "$(cuantos_hallazgos CRITICO)" \
         "$(cuantos_hallazgos AVISO)" \
         "$(esc_json "$(dato disco.ocupado_pct)")" \
-        "$(esc_json "$(dato libera.total_gb)")" \
+        "$(esc_json "$(dato libera.basura_gb)")" \
+        "$(esc_json "$(dato libera.descargas.gb)")" \
+        "$(esc_json "$(dato libera.incompleta)")" \
         "$(esc_json "$(dato meta.carpeta)")" \
         >> "$fichero"
 }

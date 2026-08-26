@@ -3,10 +3,13 @@
 #
 #  Se carga con punto:  . "$AQUI/lib-comun.sh"
 #
-#  OJO: ESCRITO SIN PODER PROBARLO EN NINGUN MAC. Ver LEEME.txt. Todo lo que
-#  hay aqui esta pensado para que un mando que falle sea un DATO y no el final
-#  del informe, porque no se sabe cuales van a fallar hasta que alguien lo
-#  ejecute de verdad.
+#  YA SE HA EJECUTADO EN UN MAC: un iMac18,3 con macOS 13.7.8, Intel, el
+#  26-ago-2026. Sigue SIN probarse en Apple Silicon y en un portatil con
+#  bateria. Ver LEEME.txt.
+#
+#  Todo lo que hay aqui esta pensado para que un mando que falle sea un DATO y
+#  no el final del informe. Esa apuesta salio bien: en la primera ejecucion real
+#  fallaron dos mandos y el informe se termino igual.
 #
 #  Bash 3.2, que es el que trae macOS desde siempre y el que va a seguir
 #  trayendo. Nada de bash 4: ni arrays asociativos, ni ${var^^}, ni readarray.
@@ -15,7 +18,7 @@
 
 # La version va en UN solo sitio, y este es el sitio. Es la leccion de PCDIAG:
 # el dia que el numero vive en tres ficheros, se actualizan dos.
-VERSION_MACDIAG="0.1.0"
+VERSION_MACDIAG="0.2.0"
 
 # ---------------------------------------------------------------------------
 # Decir cosas por pantalla
@@ -225,6 +228,61 @@ campo_ioreg() {
     local f="$1"; local clave="$2"
     [ -f "$f" ] || return 1
     grep -o "\"$clave\" = [^,}]*" "$f" 2>/dev/null | head -1 | sed -E 's/^[^=]*= *//' | tr -d '"' | sed -E 's/[[:space:]]+$//'
+}
+
+# De "tmutil destinationinfo":  "sin destino" | "con destino" | "no se sabe"
+#
+# El codigo de salida NO sirve para esto, y la primera ejecucion en un Mac de
+# verdad lo dejo claro: en Ventura el mando termina con codigo 0 tanto si hay
+# destino como si no hay ninguno. Escrito a ciegas se supuso lo contrario -que
+# fallaba en los dos casos- y el resultado fue que el aviso "este Mac no tiene
+# copia de seguridad" no saltaba nunca. Solo el texto lo dice.
+#
+# Esta aqui, y no dentro del motor, para que se pueda probar con una captura y
+# sin un Mac delante.
+tm_estado_de() {
+    local f="$1"
+    [ -f "$f" ] || { echo "no se sabe"; return; }
+    if grep -qiE 'No destinations configured' "$f" 2>/dev/null; then
+        echo "sin destino"
+    elif [ -n "$(campo_sp "$f" "Name")" ]; then
+        echo "con destino"
+    else
+        echo "no se sabe"
+    fi
+}
+
+# De "tmutil latestbackup": la ruta de la ultima copia, o nada.
+#
+# Tambien termina con codigo 0 escribiendo un error dentro ("Failed to mount
+# backup destination, error: Error Domain=..."), y ese churro se guardaba como
+# si fuera la fecha de la ultima copia. Una copia de verdad es una RUTA.
+tm_ultima_de() {
+    local f="$1"; local linea
+    [ -f "$f" ] || return 0
+    linea="$(head -1 "$f" 2>/dev/null)"
+    case "$linea" in
+        /*) printf '%s' "$linea" ;;
+    esac
+}
+
+# De "du -sk": el total en kilobytes, si es que lo ha dado.
+du_kb_de() {
+    [ -f "$1" ] || return 0
+    grep -E '^[0-9]+' "$1" 2>/dev/null | tail -1 | awk '{ print $1 }'
+}
+
+# De "du -sk": cuantas carpetas de dentro no ha dejado leer macOS.
+#
+# Hace falta porque "du" puede terminar con codigo 1 por unas cuantas carpetas
+# de privacidad y AUN ASI imprimir un total. Ese total es un minimo, no la
+# cifra: darlo por bueno es enseñar un numero corto como si fuera el completo.
+du_vetadas_de() {
+    local n
+    [ -f "$1" ] || { echo 0; return; }
+    n=$(grep -cE 'Operation not permitted|Permission denied' "$1" 2>/dev/null || true)
+    es_numero "$n" || n=0
+    echo "$n"
 }
 
 # De una salida de "df -k", buscando por punto de montaje (que es el ultimo

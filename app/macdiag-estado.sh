@@ -4,7 +4,8 @@
 #
 #  Mira como esta este Mac y deja un informe. NO TOCA NADA: solo lee.
 #
-#  OJO: ESCRITO SIN PODER PROBARLO EN NINGUN MAC. Ver LEEME.txt.
+#  PROBADO en un iMac18,3 con macOS 13.7.8 (Intel) el 26-ago-2026. Sin probar
+#  todavia en Apple Silicon ni en un portatil con bateria. Ver LEEME.txt.
 #
 #  Se puede lanzar solo, sin el menu:
 #      bash macdiag-estado.sh
@@ -334,12 +335,29 @@ Paso "Copias de seguridad"
 capturar "tm_destino" 30 tmutil destinationinfo
 capturar "tm_ultima"  40 tmutil latestbackup
 
-if salio_bien "tm_destino"; then
-    set_dato "tm.destino" "$(campo_sp "$CRUDO/tm_destino.txt" "Name")"
-fi
-if salio_bien "tm_ultima"; then
-    set_dato "tm.ultima" "$(head -1 "$CRUDO/tm_ultima.txt" 2>/dev/null)"
-fi
+# El codigo de salida de tmutil no distingue NADA, y lo que se vio al ejecutarlo
+# por fin en un Mac de verdad es lo CONTRARIO de lo que se supuso al escribirlo
+# a ciegas: "tmutil destinationinfo" termina con codigo 0 aunque no haya ningun
+# destino configurado, y lo unico que lo dice es el texto.
+#
+# Eso hacia que el aviso "este Mac no tiene copia de seguridad" -que es de los
+# mas utiles que da MacDiag- NO llegara a saltar nunca, porque colgaba de un
+# "si el mando ha fallado". El informe se limitaba a poner "no se ha podido
+# saber" en el destino. Justo el fallo que este proyecto no se permite: no se
+# sabia, y si se sabia.
+#
+# Se mira el TEXTO, siempre, y el codigo de salida no se usa para esto.
+TM_ESTADO="$(tm_estado_de "$CRUDO/tm_destino.txt")"
+TM_NOMBRE="$(campo_sp "$CRUDO/tm_destino.txt" "Name")"
+[ "$TM_ESTADO" = "con destino" ] && set_dato "tm.destino" "$TM_NOMBRE"
+set_dato "tm.estado" "$TM_ESTADO"
+
+# "tmutil latestbackup" tambien termina con codigo 0 escribiendo un mensaje de
+# error dentro ("Failed to mount backup destination, error: Error Domain=..."),
+# y ese churro se estaba guardando como si fuera la fecha de la ultima copia.
+# Una copia de verdad es una RUTA: si no empieza por barra, no es una copia.
+TM_ULTIMA="$(tm_ultima_de "$CRUDO/tm_ultima.txt")"
+[ -n "$TM_ULTIMA" ] && set_dato "tm.ultima" "$TM_ULTIMA"
 
 # ---------------------------------------------------------------------------
 # Actualizaciones
@@ -387,14 +405,36 @@ medir_carpeta() {
         return
     fi
     capturar "du_$clave" 90 du -sk "$ruta"
-    local kb
-    kb=$(grep -E '^[0-9]+' "$CRUDO/du_$clave.txt" 2>/dev/null | tail -1 | awk '{ print $1 }')
+    local kb vetadas
+    kb=$(du_kb_de "$CRUDO/du_$clave.txt")
+
+    # Cuantas carpetas de dentro no ha dejado leer macOS. Esto se vio en la
+    # primera ejecucion real: "du" sobre ~/Library/Caches termina con codigo 1
+    # porque cuatro subcarpetas son de privacidad (HomeKit, CloudKit...), pero
+    # IMPRIME el total igualmente. MacDiag lo daba por "medido" y enseñaba una
+    # cifra corta como si fuera la buena. Un numero incompleto presentado como
+    # completo es exactamente lo que este proyecto no hace.
+    vetadas=$(du_vetadas_de "$CRUDO/du_$clave.txt")
+
     if es_numero "$kb"; then
         set_dato "libera.$clave.gb" "$(gb_de_kb "$kb")"
-        set_dato "libera.$clave.estado" "medido"
+        if [ "$vetadas" -gt 0 ]; then
+            set_dato "libera.$clave.estado" "medido en parte"
+            set_dato "libera.$clave.vetadas" "$vetadas"
+            no_pude "El tamaño completo de $etiqueta" \
+                "se han medido $(gb_de_kb "$kb") GB, pero macOS no ha dejado entrar en $vetadas carpeta(s) de dentro por privacidad, asi que ahi puede haber mas. La cifra del informe es un minimo, no el total."
+        else
+            set_dato "libera.$clave.estado" "medido"
+        fi
     else
         set_dato "libera.$clave.estado" "no se ha podido medir"
-        no_pude "El tamaño de $etiqueta" "du no ha dado un numero (codigo $(codigo_de "du_$clave")). En Descargas suele ser el permiso de privacidad de la Terminal."
+        if [ "$vetadas" -gt 0 ]; then
+            no_pude "El tamaño de $etiqueta" \
+                "macOS no deja a la Terminal entrar en $ruta (permiso de privacidad). No es que este vacia: es que no se ha podido mirar. Se arregla dando Acceso total al disco a la Terminal, y no hace falta darlo solo para esto."
+        else
+            no_pude "El tamaño de $etiqueta" \
+                "du no ha dado un numero para $ruta (termino con codigo $(codigo_de "du_$clave"))."
+        fi
     fi
     set_dato "libera.$clave.ruta" "$ruta"
     set_dato "libera.$clave.etiqueta" "$etiqueta"
@@ -408,11 +448,34 @@ medir_carpeta "xcode"      "$HOME/Library/Developer/Xcode/DerivedData"          
 medir_carpeta "simulador"  "$HOME/Library/Developer/CoreSimulator/Devices"           "los simuladores de Xcode"
 medir_carpeta "descargas"  "$HOME/Downloads"                                         "la carpeta de Descargas"
 
-TOTAL_LIBERABLE=$(awk -F'\t' '
-    $1 ~ /^libera\..*\.gb$/ { s += $2 }
+# La suma se parte en dos A PROPOSITO, y el motivo salio de la primera ejecucion
+# en un Mac de verdad: de los 24,7 GB que MacDiag ofrecia como "liberables",
+# 23,1 eran la carpeta de Descargas. Descargas NO es basura -son ficheros del
+# usuario, y ahi dentro puede estar cualquier cosa- pero se sumaba con la
+# papelera y las caches bajo el titulo "que se podria liberar", y el detalle del
+# hallazgo ni siquiera la mencionaba: hablaba de papelera, caches, iPhone y
+# Xcode, que juntos eran el 6 % de la cifra.
+#
+# Un numero grande que invita a borrar lo que no habia que borrar es justo lo
+# contrario de lo que hace esta aplicacion. Van separados.
+TOTAL_BASURA=$(awk -F'\t' '
+    $1 ~ /^libera\..*\.gb$/ && $1 != "libera.descargas.gb" { s += $2 }
     END { printf "%.1f", s+0 }
 ' "$DATOS" 2>/dev/null)
-set_dato "libera.total_gb" "$TOTAL_LIBERABLE"
+DESCARGAS_GB="$(dato libera.descargas.gb)"
+es_numero "$(printf '%s' "${DESCARGAS_GB:-0}" | cut -d. -f1)" || DESCARGAS_GB="0"
+TOTAL_LIBERABLE=$(awk -v a="$TOTAL_BASURA" -v b="${DESCARGAS_GB:-0}" 'BEGIN { printf "%.1f", a+b }')
+
+# Si alguna carpeta no se ha podido medir entera, la suma es un minimo y hay que
+# decirlo: una cifra redonda que se presenta como el total, cuando le falta un
+# trozo, vuelve a ser decir que se sabe algo que no se sabe.
+MEDIDA_COJA="no"
+if grep -qE '^libera\..*\.estado\t(no se ha podido medir|medido en parte)$' "$DATOS" 2>/dev/null; then
+    MEDIDA_COJA="si"
+fi
+set_dato "libera.basura_gb"  "$TOTAL_BASURA"
+set_dato "libera.total_gb"   "$TOTAL_LIBERABLE"
+set_dato "libera.incompleta" "$MEDIDA_COJA"
 
 # ---------------------------------------------------------------------------
 # Las reglas: que de todo esto merece que alguien lo mire
@@ -484,19 +547,23 @@ if es_numero "$AP" && [ "$AP" -gt 0 ]; then
         "Las de seguridad de macOS no son opcionales en la practica. Se instalan desde Ajustes del Sistema, en Actualizacion de software."
 fi
 
-# "tmutil destinationinfo" tambien termina con error cuando NO hay destino, asi
-# que el codigo de salida no distingue "no hay copia" de "el mando ha fallado".
-# Y son dos cosas muy distintas: la primera es un aviso para el usuario y la
-# segunda es una comprobacion que no se ha hecho. Se mira el texto.
-if ! salio_bien "tm_destino"; then
-    if grep -qiE 'No destinations configured' "$CRUDO/tm_destino.txt" 2>/dev/null; then
+# Las copias de seguridad, sobre el texto y no sobre el codigo de salida (ver
+# arriba). Los tres estados son distintos y ninguno se puede confundir con otro:
+# no hay destino es un AVISO para el usuario, no saberlo es una comprobacion que
+# no se ha hecho, y tener destino pero sin copia legible tambien.
+case "$TM_ESTADO" in
+    "sin destino")
         hallazgo "AVISO" "COPIAS" "Este Mac no tiene ningun destino de Time Machine" \
-            "No hay copia de seguridad automatica. Un disco externo de los baratos y encenderlo es todo lo que hace falta; sin eso, un disco roto se lo lleva todo."
-    else
+            "No hay copia de seguridad automatica. Un disco externo de los baratos y encenderlo es todo lo que hace falta; sin eso, un disco roto se lo lleva todo." ;;
+    "con destino")
+        if [ -z "$TM_ULTIMA" ]; then
+            no_pude "Cuando fue la ultima copia de Time Machine" \
+                "hay un destino configurado ($TM_NOMBRE), pero tmutil no ha dado una ruta de copia: normalmente es que el disco de las copias no esta conectado. Que haya destino no quiere decir que la copia este hecha."
+        fi ;;
+    *)
         no_pude "Si hay copias de seguridad configuradas" \
-            "tmutil destinationinfo termino con codigo $(codigo_de tm_destino) y sin decir que no haya destinos. No se sabe si hay copia o no."
-    fi
-fi
+            "tmutil destinationinfo no ha dicho ni que haya destino ni que no lo haya (termino con codigo $(codigo_de tm_destino)). No se sabe si hay copia o no." ;;
+esac
 
 NS="$(dato disco.instantaneas)"
 if es_numero "$NS" && [ "$NS" -gt 0 ]; then
@@ -504,9 +571,19 @@ if es_numero "$NS" && [ "$NS" -gt 0 ]; then
         "Son copias que Time Machine guarda en el propio disco cuando no alcanza el externo. Ocupan sitio y el sistema las borra solo cuando le hace falta: por eso el Finder puede decir que hay menos espacio libre del que dice este informe."
 fi
 
-if [ -n "$TOTAL_LIBERABLE" ] && [ "$(awk -v t="$TOTAL_LIBERABLE" 'BEGIN { print (t>=5)?1:0 }')" = "1" ]; then
-    hallazgo "INFO" "ESPACIO" "Se podrian liberar unos $TOTAL_LIBERABLE GB" \
-        "Es la suma de papelera, caches, copias viejas de iPhone y restos de Xcode. MacDiag todavia NO borra nada: de momento solo te dice donde esta."
+# Dos hallazgos distintos, porque son dos cosas distintas: lo que sobra y lo que
+# el usuario tiene guardado. Nunca se suman en la misma frase.
+COLETILLA=""
+[ "$MEDIDA_COJA" = "si" ] && COLETILLA=" Y es un minimo: hay carpetas que macOS no ha dejado medir enteras, asi que puede haber mas."
+
+if [ -n "$TOTAL_BASURA" ] && [ "$(awk -v t="$TOTAL_BASURA" 'BEGIN { print (t>=5)?1:0 }')" = "1" ]; then
+    hallazgo "INFO" "ESPACIO" "Sobran unos $TOTAL_BASURA GB de cosas que no hacen falta" \
+        "Es la suma de la papelera, las caches, los registros, las copias viejas de iPhone y los restos de Xcode. Nada de eso es tuyo: lo genera el sistema y se rehace solo. MacDiag todavia NO borra nada, de momento solo te dice donde esta.$COLETILLA"
+fi
+
+if [ -n "$DESCARGAS_GB" ] && [ "$(awk -v t="$DESCARGAS_GB" 'BEGIN { print (t>=5)?1:0 }')" = "1" ]; then
+    hallazgo "INFO" "ESPACIO" "La carpeta de Descargas ocupa $DESCARGAS_GB GB" \
+        "Esto va aparte y NO cuenta como espacio liberable: son ficheros tuyos, y ahi dentro puede haber cualquier cosa. Se dice porque suele ser lo mas grande que se puede vaciar a mano, pero mirandolo antes: eso lo decides tu, no un programa."
 fi
 
 # ---------------------------------------------------------------------------
