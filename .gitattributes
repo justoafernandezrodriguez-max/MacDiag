@@ -1,0 +1,15 @@
+# Los finales de linea, atados a LF y no negociables.
+#
+# Esto no es cosmetica: es la trampa 9 del documento de estado, y ya se pago
+# una vez. Un .sh o un .command con finales de linea de Windows no falla en el
+# Mac con un mensaje que se entienda, falla con "bad interpreter" o con
+# "$'\r': command not found", y nadie relaciona eso con haber pasado por un PC.
+#
+# Con esto, da igual desde que sistema se edite o se clone: lo que sale del
+# repositorio siempre lleva LF.
+* text=auto eol=lf
+*.sh      text eol=lf
+*.command text eol=lf
+*.md      text eol=lf
+*.txt     text eol=lf
+*.zip     binary

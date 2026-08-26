@@ -1,0 +1,13 @@
+# El paquete no va en git: se cuelga de una release, que es donde la gente
+# lo busca y donde queda atado a una version concreta.
+*.zip
+
+# Lo que deja la aplicacion al ejecutarse, si alguien la lanza desde el propio
+# repositorio.
+INFORMES/
+historial.jsonl
+
+# Basura de los sistemas
+.DS_Store
+Thumbs.db
+desktop.ini

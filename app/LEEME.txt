@@ -1,0 +1,121 @@
+MacDiag 0.1.0 - como esta tu Mac
+=================================
+
+LO PRIMERO, Y VA EN SERIO
+-------------------------
+
+Esta version SE ESCRIBIO SIN NINGUN MAC DELANTE, desde un PC con Windows. No se
+ha ejecutado nunca. Puede que algun dato salga mal leido, o que algun mando no
+exista en tu version de macOS.
+
+Lo que NO puede pasar es que estropee nada: esta version solo LEE. No borra, no
+mueve, no cambia ningun ajuste y no pide contraseña de administrador. Los
+mandos que ejecuta salen todos listados al final del propio informe para que
+cualquiera pueda comprobarlo.
+
+Por eso se te pide que la pruebes: hace falta una primera ejecucion en un Mac
+de verdad para poder terminarla.
+
+
+COMO SE LANZA
+-------------
+
+1. Copia la carpeta entera a tu Mac, de donde te llegue: correo, USB o lo que
+   sea. Da igual.
+
+2. Abre la Terminal (Aplicaciones > Utilidades > Terminal) y escribe "bash",
+   un espacio, y **arrastra el fichero MacDiag.command a la ventana**: la ruta
+   se escribe sola. Queda algo asi:
+
+       bash /Users/tu/Desktop/app/MacDiag.command
+
+   y pulsa Intro.
+
+   Se lanza asi a proposito, y no con doble clic, porque resuelve dos cosas de
+   golpe: el fichero viene de un PC y llega sin permiso de ejecucion, y ademas
+   lo que se descarga de internet queda marcado en cuarentena y macOS se niega
+   a abrirlo desde el Finder. Lanzandolo con "bash" no pasa por ninguna de las
+   dos cosas.
+
+   Si algun dia lo quieres con doble clic, entonces si hacen falta las dos:
+
+       chmod +x "/ruta/de/la/carpeta/app/MacDiag.command"
+       xattr -dr com.apple.quarantine "/ruta/de/la/carpeta/app"
+
+   Y aun asi, en macOS Sequoia el clic derecho > Abrir ya no salta la
+   cuarentena: hay que ir a Ajustes del Sistema > Privacidad y seguridad y
+   darle a "Abrir igualmente".
+
+3. Elige la opcion 1. Tarda entre uno y tres minutos: la parte lenta es la
+   consulta de actualizaciones a Apple y la medida de las carpetas grandes.
+
+4. Al terminar se abre solo un informe en el navegador.
+
+
+LO QUE MACOS TE VA A PREGUNTAR, Y QUE CONTESTAR
+-----------------------------------------------
+
+Puede que salga alguna ventana pidiendo permiso para que la Terminal acceda a
+la carpeta de Descargas, o similar.
+
+Puedes decir que no sin problema. Lo unico que pasa es que esa linea del
+informe dira "no se ha podido medir" en vez de un numero, y saldra en el
+apartado "lo que NO se ha podido comprobar". MacDiag esta hecho para eso: NUNCA
+dice que algo esta bien cuando lo que pasa es que no ha podido mirarlo.
+
+Hay una comprobacion que probablemente falle, y es normal: los reinicios por
+fallo del sistema. Esa carpeta necesita "Acceso total al disco" para la
+Terminal, y no hace falta que se lo des solo para esto.
+
+
+QUE ME TIENES QUE MANDAR DE VUELTA
+-----------------------------------
+
+Con esto se arregla todo lo que haya salido torcido, sin volver a molestarte:
+
+    ~/MacDiag/INFORMES/<la fecha de hoy>/
+
+Esa carpeta entera. Dentro va el informe, lo que la aplicacion ha entendido, y
+sobre todo la carpeta "crudo" con la salida original de cada mando, que es lo
+que permite corregir la lectura con datos reales de tu Mac.
+
+Se llega rapido: en el Finder, menu Ir > Ir a la carpeta, y escribe
+
+    ~/MacDiag
+
+El numero de serie y el UUID del equipo se tapan solos antes de guardar nada.
+Lo que si aparece es el nombre de tu Mac, tu nombre de usuario y los nombres de
+las carpetas grandes que tengas. Si prefieres no mandar algo, borralo de la
+carpeta antes: no pasa nada, solo esa parte se queda sin arreglar.
+
+Y si falla del todo y no llega ni a empezar, con que copies y pegues lo que
+salga en la Terminal es suficiente.
+
+
+QUE MIRA
+--------
+
+  - Modelo, chip, memoria y version de macOS
+  - Disco: cuanto hay, cuanto queda y que dice el SMART del propio disco
+  - Bateria: carga, ciclos y si el sistema la da por gastada
+  - FileVault, SIP y Gatekeeper
+  - Reinicios por fallo del sistema y cierres inesperados de aplicaciones
+  - Que se abre solo al arrancar
+  - Time Machine y actualizaciones pendientes
+  - Cuanto espacio se podria liberar, y donde esta
+
+
+QUE NO HACE, Y NO ES QUE FALTE
+------------------------------
+
+  - NO borra nada. Ni siquiera se ofrece: el codigo que borra ficheros no se
+    publica sin haberlo ejecutado antes en un Mac de verdad.
+  - NO "repara permisos". Eso desaparecio de macOS en 2015 y cualquier programa
+    que hoy lo ofrezca esta fingiendo.
+  - NO libera memoria RAM. La memoria que macOS tiene en cache es memoria bien
+    usada; vaciarla hace que el equipo vaya peor el rato siguiente.
+  - NO toca nada del sistema. Desde Big Sur el volumen del sistema va sellado y
+    verificado: si se rompe, lo que toca es reinstalar macOS, no repararlo. No
+    existe aqui nada parecido al sfc o al DISM de Windows.
+  - NO manda nada por internet ni sube nada a ningun sitio. Todo se queda en
+    tu carpeta de inicio.
