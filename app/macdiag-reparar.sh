@@ -332,7 +332,7 @@ case "${1:-}" in
 
 --listar)
     C="$(ultimo_informe)"
-    [ -n "$C" ] && awk -F'\t' '$5!="" { printf "%s\t%s\n", $5, $3 }' "${C}hallazgos.tsv" 2>/dev/null
+    [ -n "$C" ] && awk -F'\t' '$5!="" && $5!="-" { printf "%s\t%s\n", $5, $3 }' "${C}hallazgos.tsv" 2>/dev/null
     ;;
 
 --aplicar)
@@ -346,7 +346,21 @@ case "${1:-}" in
         # Lo automatico se aplica. Lo que necesita una persona se ENUMERA pero
         # no se abre: abrir cuatro paneles de Ajustes de golpe no ayuda a nadie.
         automaticas=""; manuales=""
-        while IFS=$'\t' read -r gr et ti de ac; do
+        # SEIS campos, no cinco. Esto se pago: al anadir los pasos, el fichero
+        # paso a tener un campo mas y aqui se seguian leyendo cinco, asi que la
+        # accion se llevaba los pasos pegados detras:
+        #
+        #     quitar-arranque:/opt/xmrig/xmrig<TAB>MacDiag descarga el arranque...
+        #
+        # Ese destino no coincidia con nada y "Reparar todo" NO REPARABA. Y los
+        # hallazgos sin accion heredaban los pasos como si fueran una, asi que
+        # se intentaba aplicar una frase.
+        #
+        # No dio ningun error: los arreglos simplemente no pasaban. Es la trampa
+        # 2 otra vez -el fallo que no da error- y la razon de que exista la
+        # prueba que cuenta los campos.
+        while IFS=$'\t' read -r gr et ti de ac pasos; do
+            ac="$(sin_guion "$ac")"; pasos="$(sin_guion "$pasos")"
             [ -n "$ac" ] || continue
             case "$ac" in
                 abrir:*) manuales="$manuales$ac|$ti

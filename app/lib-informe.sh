@@ -112,6 +112,7 @@ CAJA
             printf '<h2>Lo que conviene mirar</h2>\n'
             for g in CRITICO AVISO INFO; do
                 while IFS=$'\t' read -r gr et ti de ac pasos; do
+                    ac="$(sin_guion "$ac")"; pasos="$(sin_guion "$pasos")"
                     [ "$gr" = "$g" ] || continue
                     quien=""
                     case "$ac" in
@@ -324,6 +325,7 @@ escribir_json() {
         primera=1
         if [ -s "$HALLAZGOS" ]; then
             while IFS=$'\t' read -r gr et ti de ac pasos; do
+                ac="$(sin_guion "$ac")"; pasos="$(sin_guion "$pasos")"
                 [ -n "$gr" ] || continue
                 [ "$primera" -eq 1 ] || printf ',\n'
                 printf '    { "gravedad": "%s", "etiqueta": "%s", "titulo": "%s", "detalle": "%s", "accion": "%s", "pasos": "%s" }' \

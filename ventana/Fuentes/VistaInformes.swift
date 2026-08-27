@@ -57,6 +57,15 @@ struct VistaInformes: View {
 
             Text("Historial  ·  una linea por cada vez que se ha mirado el equipo")
                 .font(.callout).foregroundColor(.secondary)
+            // Aviso que hace falta de verdad: los numeros de dos versiones
+            // distintas NO son comparables. Cuando MacDiag aprende a mirar algo
+            // nuevo, los criticos suben de golpe y parece que el equipo ha
+            // empeorado, cuando lo que ha cambiado es la herramienta.
+            if versionesDistintas > 1 {
+                Text("Ojo: aqui hay \(versionesDistintas) versiones distintas de MacDiag. Los numeros entre versiones NO se pueden comparar: cuando MacDiag aprende a mirar algo nuevo, los criticos suben aunque el equipo este igual.")
+                    .font(.caption).foregroundColor(colorGravedad("AVISO"))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Table(historial) {
                 TableColumn("Fecha") { l in Text(l.fecha.replacingOccurrences(of: "T", with: "  ")) }
                 TableColumn("Version", value: \.version)
@@ -71,6 +80,11 @@ struct VistaInformes: View {
             }
         }
         .onAppear { recargar() }
+    }
+
+    /// Cuantas versiones distintas de MacDiag hay en el historial.
+    private var versionesDistintas: Int {
+        Set(historial.map { $0.version }.filter { !$0.isEmpty }).count
     }
 
     private func abrirInforme(_ carpeta: URL) {

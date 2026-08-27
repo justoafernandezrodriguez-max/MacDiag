@@ -429,8 +429,12 @@ comprobar "el hallazgo guarda su accion" \
     "abrir:filevault" "$(awk -F'\t' 'NR==1{print $5}' "$HALLAZGOS")"
 comprobar "una accion automatica se guarda igual" \
     "gatekeeper" "$(awk -F'\t' 'NR==2{print $5}' "$HALLAZGOS")"
-comprobar "un hallazgo sin arreglo deja el campo vacio" \
-    "" "$(awk -F'\t' 'NR==3{print $5}' "$HALLAZGOS")"
+# Sin arreglo se escribe un GUION, no un vacio: un campo vacio haria que bash
+# se comiera el separador y corriera todo lo de detras (ver mas abajo).
+comprobar "un hallazgo sin arreglo escribe el guion" \
+    "-" "$(awk -F'\t' 'NR==3{print $5}' "$HALLAZGOS")"
+comprobar "y al leerlo vuelve a ser vacio" \
+    "" "$(sin_guion "$(awk -F'\t' 'NR==3{print $5}' "$HALLAZGOS")")"
 
 escribir_html "$TRABAJO/acciones.html"
 contiene "el informe dice cuando lo hace el usuario" "$TRABAJO/acciones.html" "Lo tienes que hacer tu"
@@ -598,6 +602,49 @@ comprobar "y el que se repite cuenta sus dos ficheros" \
 printf 'AVISO\tVIEJO\tSin pasos\tdetalle\tabrir:algo\n' > "$HALLAZGOS"
 escribir_html "$TRABAJO/cinco.html"
 contiene "un hallazgo sin pasos se sigue leyendo" "$TRABAJO/cinco.html" "Sin pasos"
+
+# ---------------------------------------------------------------------------
+printf '\n== Los campos vacios, que en bash se tragan el siguiente\n'
+# ---------------------------------------------------------------------------
+#
+# ESTA ES LA PRUEBA QUE HABRIA AHORRADO UNA TARDE.
+#
+# El tabulador es un caracter de espacio para IFS, asi que bash trata DOS
+# TABULADORES SEGUIDOS COMO UNO. Con un campo vacio en medio, todo lo que viene
+# detras se corre un sitio:
+#
+#     printf 'a\t\tc' | { IFS=$'\t' read -r x y z; }   ->  x=a  y=c  z=(vacio)
+#
+# Lo que paso de verdad: los hallazgos sin accion se leian con los PASOS en el
+# campo de la accion, y "Reparar todo" intentaba aplicar una frase como si fuera
+# un arreglo. No dio ningun error. Simplemente no reparaba.
+: > "$HALLAZGOS"
+hallazgo "AVISO" "TEMPERATURA" "La CPU va frenada" "detalle" "" "Quita el polvo | Mira que consume"
+hallazgo "AVISO" "SEGURIDAD"   "Cortafuegos apagado" "detalle" "encender-cortafuegos" "Ajustes > Red"
+
+IFS=$'\t' read -r g1 e1 t1 d1 a1 p1 < "$HALLAZGOS"
+comprobar "sin accion, los pasos NO se cuelan en la accion" "" "$(sin_guion "$a1")"
+comprobar "y los pasos siguen en su sitio" "Quita el polvo | Mira que consume" "$(sin_guion "$p1")"
+
+a2="$(awk -F'\t' 'NR==2{print $5}' "$HALLAZGOS")"
+p2="$(awk -F'\t' 'NR==2{print $6}' "$HALLAZGOS")"
+comprobar "con accion, se lee la accion y no otra cosa" "encender-cortafuegos" "$a2"
+comprobar "y sus pasos tambien"                         "Ajustes > Red"        "$p2"
+
+# Todas las lineas tienen que tener los seis campos, siempre. Si alguna trae
+# cinco es que se ha colado un vacio y lo de detras esta corrido.
+mal=0
+while IFS= read -r linea; do
+    n=$(printf '%s' "$linea" | awk -F'\t' '{print NF}')
+    [ "$n" -eq 6 ] || mal=$(( mal + 1 ))
+done < "$HALLAZGOS"
+comprobar "todas las lineas tienen los 6 campos" "0" "$mal"
+
+# Y el informe no puede ensenar el guion, que es un apano interno.
+escribir_html "$TRABAJO/guiones.html"
+no_contiene "el guion interno no se ensena al usuario" "$TRABAJO/guiones.html" ">-<"
+escribir_json "$TRABAJO/guiones.json"
+no_contiene "ni sale en el JSON"                       "$TRABAJO/guiones.json" '"accion": "-"'
 
 # ---------------------------------------------------------------------------
 printf '\n== Un informe VACIO, que es el caso que siempre se olvida\n'

@@ -201,9 +201,26 @@ datos_ordenados() {
 # esto tiene derecho a saber que se le va a hacer al equipo ANTES de pulsar el
 # boton, y a poder hacerlo a mano si prefiere. Un programa que repara sin
 # decir que toca es un programa en el que no se puede confiar.
+#
+#  NINGUN CAMPO SE DEJA VACIO, y esto no es manía: es una trampa de bash que se
+#  pago aqui. El tabulador es un caracter de espacio para IFS, asi que DOS
+#  TABULADORES SEGUIDOS CUENTAN COMO UNO:
+#
+#      printf 'a\t\tc' | { IFS=$'\t' read -r x y z; }   ->  x=a  y=c  z=
+#
+#  Con un campo vacio en medio, todo lo que viene detras se corre un sitio. Lo
+#  que paso de verdad: los hallazgos sin accion se leian con los PASOS metidos
+#  en el campo de la accion, y "Reparar todo" intentaba aplicar una frase. No
+#  dio ningun error: los arreglos simplemente no ocurrian.
+#
+#  Se escribe un guion donde no hay nada, y quien lee lo vuelve a convertir en
+#  vacio. Feo, pero es lo unico que aguanta en bash 3.2.
 hallazgo() {
-    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "${5:-}" "${6:-}" >> "$HALLAZGOS"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "${5:--}" "${6:--}" >> "$HALLAZGOS"
 }
+
+# Convierte el guion de "aqui no hay nada" en vacio de verdad.
+sin_guion() { [ "$1" = "-" ] && printf '' || printf '%s' "$1"; }
 
 # no_pude <que> <por-que> [ambito]
 #
@@ -222,6 +239,7 @@ hallazgo() {
 no_pude() {
     printf '%s\t%s\t%s\n' "$1" "$2" "${3:-diagnostico}" >> "$NOPUDE"
 }
+# (aqui no hace falta el guion: los tres campos van siempre llenos)
 
 cuantos_hallazgos() {
     [ -f "$HALLAZGOS" ] || { echo 0; return; }
