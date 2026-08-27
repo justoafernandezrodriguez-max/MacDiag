@@ -93,10 +93,18 @@ struct VistaEstado: View {
                 // macOS la segunda pasa a todas horas por los permisos de
                 // privacidad. Juntarlas seria decir que todo esta bien cuando
                 // lo que pasa es que no se ha mirado.
-                if !inf.no_he_podido.isEmpty {
-                    DisclosureGroup("No se ha podido comprobar (\(inf.no_he_podido.count))") {
+                // SOLO las lagunas del DIAGNOSTICO. Lo de medir carpetas es
+                // mantenimiento y vive en su pestana: mezclarlos hacia que este
+                // apartado -que existe para avisar de que no se han podido leer
+                // cosas como los fallos del sistema- se llenara de recados
+                // sobre la papelera, y el aviso que importaba se perdiera.
+                let lagunas = inf.no_he_podido.filter { !$0.esDeMantenimiento }
+                if !lagunas.isEmpty {
+                    DisclosureGroup("No se ha podido comprobar del equipo (\(lagunas.count))") {
                         VStack(alignment: .leading, spacing: 6) {
-                            ForEach(inf.no_he_podido) { n in
+                            Text("No son fallos: son cosas que MacDiag no ha llegado a mirar, asi que no puede decir si estan bien o mal.")
+                                .font(.caption).foregroundColor(.secondary)
+                            ForEach(lagunas) { n in
                                 VStack(alignment: .leading, spacing: 1) {
                                     Text(n.que).font(.callout).bold()
                                     Text(n.porque).font(.caption).foregroundColor(.secondary)
@@ -104,6 +112,12 @@ struct VistaEstado: View {
                             }
                         }.padding(.top, 4)
                     }.font(.callout)
+                }
+
+                let deMedida = inf.no_he_podido.filter { $0.esDeMantenimiento }
+                if !deMedida.isEmpty {
+                    Text("· \(deMedida.count) carpeta(s) no se han podido medir. Eso es mantenimiento, no salud del equipo: esta en la otra pestana.")
+                        .font(.caption).foregroundColor(.secondary)
                 }
             } else {
                 VStack(alignment: .leading, spacing: 6) {

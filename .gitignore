@@ -14,3 +14,8 @@ desktop.ini
 
 # La ventana compilada: se genera con ventana/construir.sh, no se versiona.
 MacDiag.app/
+
+# El icono compilado y sus intermedios: se generan, no se versionan.
+ventana/icono/dibujar
+ventana/icono/MacDiag.iconset/
+ventana/icono/MacDiag.icns

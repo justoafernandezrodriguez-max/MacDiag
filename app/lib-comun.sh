@@ -18,7 +18,7 @@
 
 # La version va en UN solo sitio, y este es el sitio. Es la leccion de PCDIAG:
 # el dia que el numero vive en tres ficheros, se actualizan dos.
-VERSION_MACDIAG="0.3.0"
+VERSION_MACDIAG="0.4.0"
 
 # ---------------------------------------------------------------------------
 # Decir cosas por pantalla
@@ -198,8 +198,22 @@ hallazgo() {
     printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "${5:-}" >> "$HALLAZGOS"
 }
 
-no_pude() {    # que  por-que
-    printf '%s\t%s\n' "$1" "$2" >> "$NOPUDE"
+# no_pude <que> <por-que> [ambito]
+#
+# El tercer campo separa DOS COSAS QUE NO SE PARECEN EN NADA y que hasta la
+# 0.3.0 salian revueltas en la misma lista:
+#
+#   diagnostico  - no se ha podido saber si el equipo esta bien. Ejemplo: no
+#                  se han podido leer los reinicios por fallo del sistema.
+#                  Esto es una LAGUNA en el diagnostico y preocupa.
+#   mantenimiento- no se ha podido medir cuanto ocupa algo. Ejemplo: el tamano
+#                  de la papelera. Esto no dice nada de la salud del equipo.
+#
+# Mezclarlas hacia que el apartado "lo que no se ha podido comprobar" -que
+# existe para avisar de agujeros en el diagnostico- se llenara de recados sobre
+# carpetas, y el aviso que importaba se perdiera entre ellos.
+no_pude() {
+    printf '%s\t%s\t%s\n' "$1" "$2" "${3:-diagnostico}" >> "$NOPUDE"
 }
 
 cuantos_hallazgos() {

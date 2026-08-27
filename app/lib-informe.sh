@@ -243,15 +243,33 @@ CAJA
         fi
 
         # --- Lo que no se ha podido mirar ------------------------------------
-        printf '<h2>Lo que NO se ha podido comprobar</h2>\n'
-        if [ -s "$NOPUDE" ]; then
-            printf '<p class="nota">Esto no es una lista de fallos del Mac: es lo que MacDiag no ha llegado a ver. Callarselo seria decir que todo esta bien.</p>\n'
-            while IFS=$'\t' read -r que porque; do
+        # DOS listas, no una. Un agujero en el diagnostico -no se han podido
+        # leer los panics- y un recado de mantenimiento -no se ha podido medir
+        # la papelera- no tienen nada que ver, y juntarlos hacia que el aviso
+        # que importaba se perdiera entre carpetas.
+        n_diag=$(awk -F'\t' '$3!="mantenimiento"' "$NOPUDE" 2>/dev/null | grep -c . )
+        n_mant=$(awk -F'\t' '$3=="mantenimiento"' "$NOPUDE" 2>/dev/null | grep -c . )
+        es_numero "$n_diag" || n_diag=0
+        es_numero "$n_mant" || n_mant=0
+
+        printf '<h2>Lo que NO se ha podido comprobar del equipo</h2>\n'
+        if [ "$n_diag" -gt 0 ]; then
+            printf '<p class="nota">Estas son <b>lagunas del diagnostico</b>: cosas que MacDiag no ha llegado a mirar, asi que no puede decir si estan bien o mal. Callarselas seria decir que todo esta bien.</p>\n'
+            awk -F'\t' '$3!="mantenimiento"' "$NOPUDE" | while IFS=$'\t' read -r que porque ambito; do
                 [ -n "$que" ] || continue
                 printf '<div class="h AVISO"><b>%s</b><p>%s</p></div>\n' "$(esc_html "$que")" "$(esc_html "$porque")"
-            done < "$NOPUDE"
+            done
         else
-            printf '<p class="nota">Nada: todas las comprobaciones se han podido hacer.</p>\n'
+            printf '<p class="nota">Nada: todas las comprobaciones del equipo se han podido hacer.</p>\n'
+        fi
+
+        if [ "$n_mant" -gt 0 ]; then
+            printf '<h2>Lo que no se ha podido medir</h2>\n'
+            printf '<p class="nota">Esto es <b>mantenimiento</b>, no salud del equipo: son carpetas cuyo tamano macOS no ha dejado calcular. No dice nada de si el Mac esta bien; solo que la cifra de espacio se queda corta.</p>\n'
+            awk -F'\t' '$3=="mantenimiento"' "$NOPUDE" | while IFS=$'\t' read -r que porque ambito; do
+                [ -n "$que" ] || continue
+                printf '<div class="h INFO"><b>%s</b><p>%s</p></div>\n' "$(esc_html "$que")" "$(esc_html "$porque")"
+            done
         fi
 
         # --- Los mandos ------------------------------------------------------
@@ -318,10 +336,11 @@ escribir_json() {
         printf '  "no_he_podido": [\n'
         primera=1
         if [ -s "$NOPUDE" ]; then
-            while IFS=$'\t' read -r que porque; do
+            while IFS=$'\t' read -r que porque ambito; do
                 [ -n "$que" ] || continue
                 [ "$primera" -eq 1 ] || printf ',\n'
-                printf '    { "que": "%s", "porque": "%s" }' "$(esc_json "$que")" "$(esc_json "$porque")"
+                printf '    { "que": "%s", "porque": "%s", "ambito": "%s" }' \
+                    "$(esc_json "$que")" "$(esc_json "$porque")" "$(esc_json "${ambito:-diagnostico}")"
                 primera=0
             done < "$NOPUDE"
         fi

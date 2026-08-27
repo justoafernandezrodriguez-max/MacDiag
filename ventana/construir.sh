@@ -89,9 +89,31 @@ cat > "$DESTINO/Contents/Info.plist" <<PLIST
     <key>LSMinimumSystemVersion</key>    <string>13.0</string>
     <key>NSHighResolutionCapable</key>   <true/>
     <key>LSApplicationCategoryType</key> <string>public.app-category.utilities</string>
+    <key>CFBundleIconFile</key>          <string>MacDiag</string>
 </dict>
 </plist>
 PLIST
+
+# --- El icono ---------------------------------------------------------------
+#
+# Se DIBUJA, no se guarda: icono/DibujarIcono.swift lo pinta con CoreGraphics y
+# iconutil lo empaqueta. Asi el icono se cambia tocando cuatro numeros y no hay
+# que meter un binario en el repositorio ni abrir ningun programa de dibujo.
+ICONO="$AQUI/icono"
+if [ -f "$ICONO/DibujarIcono.swift" ]; then
+    if [ ! -f "$ICONO/MacDiag.icns" ] || [ "$ICONO/DibujarIcono.swift" -nt "$ICONO/MacDiag.icns" ]; then
+        ( cd "$ICONO" \
+          && swiftc -O -o dibujar DibujarIcono.swift 2>/dev/null \
+          && ./dibujar ./MacDiag.iconset >/dev/null 2>&1 \
+          && iconutil -c icns MacDiag.iconset -o MacDiag.icns 2>/dev/null )
+    fi
+    if [ -f "$ICONO/MacDiag.icns" ]; then
+        cp "$ICONO/MacDiag.icns" "$DESTINO/Contents/Resources/MacDiag.icns"
+        echo "  Icono: la D azul"
+    else
+        echo "  OJO: no se ha podido generar el icono; la .app saldra con el generico."
+    fi
+fi
 
 # --- Los scripts, que son el motor de verdad --------------------------------
 if [ "$MODO" = "distribuir" ]; then

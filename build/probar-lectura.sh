@@ -476,6 +476,95 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+printf '\n== Diagnostico y mantenimiento, separados\n'
+# ---------------------------------------------------------------------------
+#
+# "No se han podido leer los fallos del sistema" y "no se ha podido medir la
+# papelera" acababan en la misma lista. La primera es una laguna en la revision
+# del equipo y preocupa; la segunda no dice nada de la salud del Mac. Juntas,
+# el aviso que importaba se perdia entre recados sobre carpetas.
+: > "$NOPUDE"
+no_pude "Los panicos del sistema" "hace falta Acceso total al disco"
+no_pude "El tamano de la Papelera" "macOS no deja medirla" "mantenimiento"
+
+comprobar "por defecto una laguna es de diagnostico" \
+    "diagnostico" "$(awk -F'\t' 'NR==1{print $3}' "$NOPUDE")"
+comprobar "y el mantenimiento se marca como tal" \
+    "mantenimiento" "$(awk -F'\t' 'NR==2{print $3}' "$NOPUDE")"
+
+escribir_html "$TRABAJO/separado.html"
+contiene "el informe titula las lagunas del equipo"   "$TRABAJO/separado.html" "NO se ha podido comprobar del equipo"
+contiene "y lo de medir va en su propio apartado"     "$TRABAJO/separado.html" "Lo que no se ha podido medir"
+contiene "el panic sale como laguna del diagnostico"  "$TRABAJO/separado.html" "Los panicos del sistema"
+contiene "y se explica que lo otro es mantenimiento"  "$TRABAJO/separado.html" "no salud del equipo"
+
+escribir_json "$TRABAJO/separado.json"
+contiene "el JSON lleva el ambito"            "$TRABAJO/separado.json" '"ambito": "mantenimiento"'
+contiene "y el de diagnostico tambien"        "$TRABAJO/separado.json" '"ambito": "diagnostico"'
+
+# Con SOLO cosas de mantenimiento, el apartado del equipo tiene que decir que
+# esta limpio: si no, un recado sobre una carpeta parecería un fallo del Mac.
+: > "$NOPUDE"
+no_pude "El tamano de las caches" "permisos" "mantenimiento"
+escribir_html "$TRABAJO/solo-mant.html"
+contiene "solo mantenimiento deja limpio el diagnostico" "$TRABAJO/solo-mant.html" "todas las comprobaciones del equipo se han podido hacer"
+
+# ---------------------------------------------------------------------------
+printf '\n== El detector de arranques sospechosos\n'
+# ---------------------------------------------------------------------------
+#
+# Escrito despues de que MacDiag no viera un minero de criptomonedas que
+# llevaba SEIS DIAS corriendo como root en el Mac de desarrollo. El informe
+# decia "Demonios del sistema: 4" y cinco de ellos eran el minero y sus restos.
+# Contar no es mirar.
+. "$RAIZ/app/lib-vigilancia.sh"
+FALSOS="$TRABAJO/plists"; mkdir -p "$FALSOS"
+
+# Uno que finge ser de Apple, con fecha falsificada y script escondido.
+cat > "$FALSOS/com.apple.metadata.fetch.plist" <<'FIN'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>com.apple.metadata.fetch</string>
+<key>ProgramArguments</key><array><string>/bin/bash</string><string>/var/tmp/.instalador.sh</string></array>
+<key>RunAtLoad</key><true/>
+</dict></plist>
+FIN
+touch -t 197001010000 "$FALSOS/com.apple.metadata.fetch.plist" 2>/dev/null
+
+# Uno legitimo del propio usuario, que TAMBIEN lanza /bin/bash. Este no puede
+# marcarse: un aviso que salta sin motivo ensena a ignorar los avisos.
+cat > "$FALSOS/es.mrfactory.copias.plist" <<'FIN'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>es.mrfactory.copias</string>
+<key>ProgramArguments</key><array><string>/bin/bash</string><string>/usr/bin/true</string></array>
+<key>RunAtLoad</key><true/>
+</dict></plist>
+FIN
+
+m_malo="$(motivos_sospecha "$FALSOS/com.apple.metadata.fetch.plist")"
+m_bueno="$(motivos_sospecha "$FALSOS/es.mrfactory.copias.plist")"
+
+if printf '%s' "$m_malo" | grep -q "dice ser de Apple"; then
+    BIEN=$(( BIEN + 1 )); printf '  ok    caza al que finge ser de Apple\n'
+else
+    MAL=$(( MAL + 1 )); printf '  MAL   NO ha cazado al que finge ser de Apple\n'
+fi
+if printf '%s' "$m_malo" | grep -q "fecha falsificada"; then
+    BIEN=$(( BIEN + 1 )); printf '  ok    ve la fecha falsificada de 1970\n'
+else
+    MAL=$(( MAL + 1 )); printf '  MAL   NO ha visto la fecha falsificada\n'
+fi
+if printf '%s' "$m_malo" | grep -qE "ficheros temporales|fichero escondido"; then
+    BIEN=$(( BIEN + 1 )); printf '  ok    ve que arranca algo escondido en /var/tmp\n'
+else
+    MAL=$(( MAL + 1 )); printf '  MAL   NO ha visto el script escondido\n'
+fi
+comprobar "y NO marca al agente legitimo que usa bash" "" "$m_bueno"
+
+# ---------------------------------------------------------------------------
 printf '\n== Un informe VACIO, que es el caso que siempre se olvida\n'
 DATOS="$TRABAJO/datos2.tsv"; HALLAZGOS="$TRABAJO/hall2.tsv"; NOPUDE="$TRABAJO/nop2.tsv"
 : > "$DATOS"; : > "$HALLAZGOS"; : > "$NOPUDE"
@@ -483,7 +572,7 @@ set_dato "bateria.hay" "no"
 escribir_html "$TRABAJO/vacio.html"
 contiene "sin hallazgos lo dice"        "$TRABAJO/vacio.html" "no hay nada que señalar"
 contiene "sin bateria no es un fallo"   "$TRABAJO/vacio.html" "es de sobremesa"
-contiene "sin nada que no se pudo"      "$TRABAJO/vacio.html" "todas las comprobaciones se han podido hacer"
+contiene "sin nada que no se pudo"      "$TRABAJO/vacio.html" "todas las comprobaciones del equipo se han podido hacer"
 
 # ---------------------------------------------------------------------------
 printf '\n'

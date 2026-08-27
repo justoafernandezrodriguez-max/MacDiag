@@ -21,6 +21,7 @@
 
 AQUI="$(cd "$(dirname "$0")" && pwd)"
 . "$AQUI/lib-comun.sh"
+. "$AQUI/lib-vigilancia.sh"
 . "$AQUI/lib-informe.sh"
 
 # ---------------------------------------------------------------------------
@@ -328,6 +329,140 @@ for par in "agentes_sistema:arranque.agentes_sistema" "demonios:arranque.demonio
 done
 
 # ---------------------------------------------------------------------------
+# QUIEN es cada cosa que arranca sola
+#
+# Antes esto se limitaba a CONTAR: "agentes 9, demonios 4". Un numero sin
+# nombres no dice nada, y en el Mac donde se escribio MacDiag daba ademas una
+# confianza que no tocaba: de esos demonios, cinco eran un minero de
+# criptomonedas, su reinstalador camuflado de Apple, y restos de otro camuflado
+# de Google. Llevaba seis dias corriendo y el informe decia "4".
+#
+# Contar no es mirar.
+# ---------------------------------------------------------------------------
+Paso "Quien arranca solo con el equipo"
+
+N_SOSPECHOSOS=0
+: > "$CRUDO/_ARRANQUE.tsv"
+for carpeta in /Library/LaunchDaemons /Library/LaunchAgents "$HOME/Library/LaunchAgents"; do
+    [ -d "$carpeta" ] || continue
+    for plist in "$carpeta"/*.plist; do
+        [ -e "$plist" ] || continue
+        prog="$(programa_de_plist "$plist")"
+        motivos="$(motivos_sospecha "$plist")"
+        printf '%s\t%s\t%s\n' "$(basename "$plist")" "${prog:-?}" "$motivos" >> "$CRUDO/_ARRANQUE.tsv"
+        if [ -n "$motivos" ]; then
+            N_SOSPECHOSOS=$(( N_SOSPECHOSOS + 1 ))
+            DiMal "$(basename "$plist"): $motivos"
+            hallazgo "CRITICO" "ARRANQUE" "Arranca solo y no deberia: $(basename "$plist")" \
+                "$motivos. Esta en $carpeta y lanza \"${prog:-?}\". MacDiag no lo quita solo: un elemento de arranque puede ser de algo que si usas, y quitarlo a ciegas rompe programas. Miralo, y si no es tuyo, se quita descargandolo con launchctl y borrando el fichero." \
+                "abrir:arranque"
+        fi
+    done
+done
+set_dato "arranque.sospechosos" "$N_SOSPECHOSOS"
+[ "$N_SOSPECHOSOS" -eq 0 ] && DiOk "nada raro en lo que arranca solo"
+
+# ---------------------------------------------------------------------------
+# Que se esta comiendo el equipo ahora mismo
+# ---------------------------------------------------------------------------
+Paso "Lo que mas consume"
+
+capturar "procesos" 20 ps -Aceo pid,pcpu,pmem,comm -r
+PESADOS=0
+while IFS=$'\t' read -r pid pcpu pmem cmd; do
+    [ -n "$pid" ] || continue
+    PESADOS=$(( PESADOS + 1 ))
+    ruta="$(ruta_de_proceso "$pid")"
+    DiOjo "$cmd: $pcpu % de CPU"
+    # Un proceso que se come el equipo Y ademas vive donde no debe no es un
+    # programa pesado: es otra cosa. Los dos casos se dicen distinto.
+    case "$ruta" in
+        /opt/*|/tmp/*|/var/tmp/*|/private/tmp/*|/private/var/tmp/*)
+            hallazgo "CRITICO" "PROCESOS" "\"$cmd\" se come el $pcpu % de la CPU y arranca desde $ruta" \
+                "Ese sitio no es donde macOS guarda los programas. Un programa que consume asi y ademas vive en una carpeta de paso o en /opt es, casi siempre, algo que no has puesto tu: mineros de criptomonedas y similares. Miralo antes de nada." \
+                "" ;;
+        *)
+            hallazgo "AVISO" "PROCESOS" "\"$cmd\" se esta llevando el $pcpu % de la CPU" \
+                "Lleva la CPU muy cargada. Si es algo que has abierto tu -renderizar, comprimir, compilar- es normal y se pasa al terminar. Si no sabes que es, merece una mirada." \
+                "" ;;
+    esac
+done < <(procesos_pesados 70)
+set_dato "procesos.pesados" "$PESADOS"
+[ "$PESADOS" -eq 0 ] && DiOk "nada se esta comiendo la CPU"
+
+# ---------------------------------------------------------------------------
+# Memoria de verdad: no cuanta hay, sino si falta
+#
+# El dato ya se capturaba desde la 0.1.0 y no lo miraba nadie. En este mismo
+# Mac llego a haber 31,9 GB de intercambio usados de 33, con 16 GB de RAM: la
+# explicacion exacta de "va lento" que un usuario no sabe mirar.
+# ---------------------------------------------------------------------------
+Paso "Memoria"
+
+SWAP_USADO_MB="$(sed -E 's/.*used = ([0-9.]+)M.*/\1/' "$CRUDO/swap.txt" 2>/dev/null | cut -d. -f1)"
+es_numero "$SWAP_USADO_MB" || SWAP_USADO_MB=""
+set_dato "mem.swap_usado_mb" "${SWAP_USADO_MB:-}"
+if es_numero "$SWAP_USADO_MB"; then
+    if [ "$SWAP_USADO_MB" -ge 8192 ]; then
+        hallazgo "AVISO" "MEMORIA" "El equipo esta usando $(( SWAP_USADO_MB / 1024 )) GB de disco como si fuera memoria" \
+            "Cuando se acaba la memoria, macOS tira del disco, que es mucho mas lento. Es la explicacion mas comun de que un Mac vaya a tirones sin motivo aparente. Cerrar lo que no se este usando lo baja; si pasa siempre, es que a este equipo le falta memoria para lo que se le pide." \
+            ""
+    fi
+fi
+
+# El estrangulamiento: la CPU bajando de velocidad a proposito. Otro dato que
+# se capturaba y no se leia.
+LIMITE_CPU="$(awk -F'= *' '/CPU_Speed_Limit/ { gsub(/[^0-9]/,"",$2); print $2; exit }' "$CRUDO/termico.txt" 2>/dev/null)"
+set_dato "cpu.limite" "${LIMITE_CPU:-}"
+if es_numero "$LIMITE_CPU" && [ "$LIMITE_CPU" -lt 100 ]; then
+    hallazgo "AVISO" "TEMPERATURA" "La CPU esta funcionando al $LIMITE_CPU % de su velocidad" \
+        "El sistema la esta frenando a proposito, y eso pasa por calor o porque algo la tiene al maximo mucho rato. Si el equipo tiene polvo dentro o los ventiladores no van, se queda asi. Mira tambien lo que mas consume, mas arriba." \
+        ""
+fi
+
+# ---------------------------------------------------------------------------
+# Las puertas abiertas
+# ---------------------------------------------------------------------------
+Paso "Puertas abiertas"
+
+capturar "cortafuegos" 15 /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate
+capturar "escuchando"  25 lsof -nP -iTCP -sTCP:LISTEN
+
+if grep -qi 'disabled' "$CRUDO/cortafuegos.txt" 2>/dev/null; then
+    set_dato "seg.cortafuegos" "apagado"
+    hallazgo "AVISO" "SEGURIDAD" "El cortafuegos esta apagado" \
+        "Sin el, cualquier programa de este Mac puede quedarse escuchando conexiones de fuera sin pedirte permiso. En un equipo que se conecta a redes que no son la de casa, conviene encenderlo." \
+        "abrir:cortafuegos"
+elif grep -qi 'enabled' "$CRUDO/cortafuegos.txt" 2>/dev/null; then
+    set_dato "seg.cortafuegos" "encendido"
+else
+    no_pude "Si el cortafuegos esta encendido" "socketfilterfw no ha contestado nada que se pueda leer"
+fi
+
+# Compartir pantalla encendido es una puerta de entrada al equipo entero, y casi
+# nadie recuerda haberlo dejado puesto.
+if launchctl print system/com.apple.screensharing >/dev/null 2>&1; then
+    set_dato "seg.pantalla_compartida" "si"
+    hallazgo "AVISO" "SEGURIDAD" "Compartir pantalla esta encendido" \
+        "Alguien con usuario y contrasena de este Mac puede verlo y manejarlo por la red. Si no lo usas, se apaga en Ajustes del Sistema, en General > Compartir." \
+        "abrir:compartir"
+else
+    set_dato "seg.pantalla_compartida" "no"
+fi
+
+# Puertos escuchando en TODAS las interfaces -no solo en el propio equipo-, que
+# es la diferencia entre "esto lo usa un programa mio" y "esto lo puede alcanzar
+# cualquiera de la red".
+N_ABIERTOS=$(awk 'NR>1 && $9 !~ /^(127\.0\.0\.1|\[::1\])/ { n++ } END { print n+0 }' "$CRUDO/escuchando.txt" 2>/dev/null)
+es_numero "$N_ABIERTOS" || N_ABIERTOS=0
+set_dato "seg.puertos_abiertos" "$N_ABIERTOS"
+if [ "$N_ABIERTOS" -gt 0 ]; then
+    hallazgo "INFO" "SEGURIDAD" "Hay $N_ABIERTOS puerto(s) abiertos a toda la red" \
+        "Son programas de este Mac esperando conexiones de fuera, no solo de si mismo. Puede estar perfectamente bien -un servidor que tu has puesto- pero conviene saber cuales son. La lista entera esta en la carpeta crudo, en escuchando.txt." \
+        ""
+fi
+
+# ---------------------------------------------------------------------------
 # Copias de seguridad
 # ---------------------------------------------------------------------------
 Paso "Copias de seguridad"
@@ -422,7 +557,8 @@ medir_carpeta() {
             set_dato "libera.$clave.estado" "medido en parte"
             set_dato "libera.$clave.vetadas" "$vetadas"
             no_pude "El tamaño completo de $etiqueta" \
-                "se han medido $(gb_de_kb "$kb") GB, pero macOS no ha dejado entrar en $vetadas carpeta(s) de dentro por privacidad, asi que ahi puede haber mas. La cifra del informe es un minimo, no el total."
+                "se han medido $(gb_de_kb "$kb") GB, pero macOS no ha dejado entrar en $vetadas carpeta(s) de dentro por privacidad, asi que ahi puede haber mas. La cifra del informe es un minimo, no el total." \
+                "mantenimiento"
         else
             set_dato "libera.$clave.estado" "medido"
         fi
@@ -430,10 +566,12 @@ medir_carpeta() {
         set_dato "libera.$clave.estado" "no se ha podido medir"
         if [ "$vetadas" -gt 0 ]; then
             no_pude "El tamaño de $etiqueta" \
-                "macOS no deja a la Terminal entrar en $ruta (permiso de privacidad). No es que este vacia: es que no se ha podido mirar. Se arregla dando Acceso total al disco a la Terminal, y no hace falta darlo solo para esto."
+                "macOS no deja a MacDiag entrar en $ruta (permiso de privacidad). No es que este vacia: es que no se ha podido mirar. Se arregla dando Acceso total al disco a MacDiag." \
+                "mantenimiento"
         else
             no_pude "El tamaño de $etiqueta" \
-                "du no ha dado un numero para $ruta (termino con codigo $(codigo_de "du_$clave"))."
+                "du no ha dado un numero para $ruta (termino con codigo $(codigo_de "du_$clave"))." \
+                "mantenimiento"
         fi
     fi
     set_dato "libera.$clave.ruta" "$ruta"

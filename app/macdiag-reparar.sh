@@ -150,6 +150,40 @@ aplicar() {
         Di "Te he abierto Time Machine. Conecta un disco externo y elige 'Anadir disco'."
         ;;
 
+    abrir:cortafuegos)
+        Paso "Cortafuegos"
+        open "x-apple.systempreferences:com.apple.preference.security?Firewall" 2>/dev/null \
+            || open "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension" 2>/dev/null
+        Di "Te he abierto los ajustes. El interruptor es 'Firewall'."
+        Di "No lo enciendo yo: puede cortar programas tuyos que esperan conexiones,"
+        Di "y eso tienes que verlo tu antes."
+        ;;
+
+    abrir:compartir)
+        Paso "Compartir"
+        open "x-apple.systempreferences:com.apple.preferences.sharing" 2>/dev/null \
+            || open "x-apple.systempreferences:com.apple.Sharing-Settings.extension" 2>/dev/null
+        Di "Te he abierto Compartir. Si no usas 'Compartir pantalla', apagalo."
+        Di "No lo apago yo por si estas trabajando en remoto ahora mismo: te dejaria fuera."
+        ;;
+
+    abrir:arranque)
+        # No se quita nada solo, y esto NO es prudencia de mas: un elemento de
+        # arranque puede ser de un programa que si se usa, y quitarlo a ciegas
+        # lo rompe. Se abre la carpeta para que se vea con nombres y fechas.
+        Paso "Lo que arranca solo"
+        open /Library/LaunchDaemons 2>/dev/null
+        Di "Te he abierto la carpeta. MacDiag NO quita nada de aqui a proposito:"
+        Di "algunos son de programas que si usas, y borrar el que no toca los rompe."
+        Di ""
+        Di "Para quitar uno, cuando estes seguro de que no es tuyo:"
+        Di "    sudo launchctl bootout system/LA-ETIQUETA"
+        Di "    sudo rm '/Library/LaunchDaemons/EL-FICHERO.plist'"
+        Di ""
+        Di "Y mira antes a que programa apunta, porque el fichero de arranque"
+        Di "suele ser solo la punta: el programa sigue en el disco."
+        ;;
+
     abrir:almacenamiento)
         Paso "Almacenamiento"
         open "x-apple.systempreferences:com.apple.settings.Storage" 2>/dev/null \

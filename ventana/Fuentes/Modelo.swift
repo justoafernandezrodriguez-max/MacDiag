@@ -41,6 +41,13 @@ struct NoPude: Codable, Identifiable, Hashable {
     var id: String { que }
     let que: String
     let porque: String
+
+    /// "diagnostico" = laguna en la revision del equipo, preocupa.
+    /// "mantenimiento" = no se ha podido medir una carpeta, no dice nada de la
+    /// salud del Mac. Van en sitios distintos a proposito.
+    let ambito: String?
+
+    var esDeMantenimiento: Bool { (ambito ?? "diagnostico") == "mantenimiento" }
 }
 
 struct Mando: Codable, Identifiable, Hashable {
