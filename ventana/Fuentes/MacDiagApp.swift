@@ -37,6 +37,8 @@ struct VentanaPrincipal: View {
                 .tabItem { Label("Informes e historial", systemImage: "doc.text") }
         }
         .padding(14)
+        .disabled(estado.trabajando)
+        .overlay { if estado.trabajando { Trabajando(app: estado) } }
         .onAppear { estado.cargarUltimoInforme() }
     }
 }
@@ -49,7 +51,7 @@ final class EstadoApp: ObservableObject {
     @Published var carpetaInforme: URL?
     @Published var trabajando = false
     @Published var tarea = ""
-    @Published var registro: [String] = []
+    @Published var ultimaLinea = ""
     @Published var marcados: Set<String> = []
 
     func cargarUltimoInforme() {
@@ -59,9 +61,10 @@ final class EstadoApp: ObservableObject {
         }
     }
 
+    /// Solo se guarda la ultima linea, para el renglon pequeño del velo. El
+    /// detalle completo esta en la carpeta "crudo" del informe.
     func anotar(_ t: String) {
-        registro.append(t)
-        if registro.count > 400 { registro.removeFirst(registro.count - 400) }
+        ultimaLinea = t.hasPrefix("==") ? String(t.dropFirst(2)).trimmingCharacters(in: .whitespaces) : t
     }
 
     /// Lanza un script y, al acabar, recarga el informe si se pide. Recargar
@@ -72,18 +75,17 @@ final class EstadoApp: ObservableObject {
                   recargarAlFinal: Bool = false,
                   alTerminar: (() -> Void)? = nil) {
         guard !trabajando else { return }
-        trabajando = true
+        withAnimation(.easeInOut(duration: 0.2)) { trabajando = true }
         tarea = titulo
-        registro = []
-        anotar("== \(titulo)")
+        ultimaLinea = ""
         Motor.lanzar(script: script, argumentos: argumentos,
                      linea: { [weak self] l in self?.anotar(l) },
                      final: { [weak self] codigo in
             guard let self else { return }
             if codigo != 0 { self.anotar("El script ha terminado con codigo \(codigo).") }
             if recargarAlFinal { self.cargarUltimoInforme() }
-            self.trabajando = false
-            self.tarea = ""
+            withAnimation(.easeInOut(duration: 0.25)) { self.trabajando = false }
+            self.tarea = ""; self.ultimaLinea = ""
             alTerminar?()
         })
     }
@@ -119,30 +121,56 @@ struct Kpi: View {
     }
 }
 
-/// La consola de abajo. Existe porque un proceso que tarda un minuto sin decir
-/// nada parece un programa colgado, y porque asi se ve exactamente que mando
-/// se ha ejecutado.
-struct Consola: View {
-    let lineas: [String]
+/// El velo de "estoy trabajando".
+///
+/// Antes aqui habia una consola que escupia cada linea del script. Servia para
+/// que no pareciera colgado, pero a quien usa la aplicacion le da igual como se
+/// llama el mando numero catorce: lo unico que necesita saber es que esta
+/// pasando algo y que no se ha roto.
+///
+/// El detalle tecnico no se pierde: sigue entero en la carpeta "crudo" del
+/// informe, y ahi es donde tiene sentido buscarlo.
+struct Trabajando: View {
+    @ObservedObject var app: EstadoApp
+    @State private var latido = false
+
     var body: some View {
-        ScrollViewReader { lector in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 1) {
-                    ForEach(Array(lineas.enumerated()), id: \.offset) { i, l in
-                        Text(l)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(l.hasPrefix("==") ? .primary : .secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .id(i)
-                    }
-                }.padding(8)
+        ZStack {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .ignoresSafeArea()
+
+            VStack(spacing: 16) {
+                ZStack {
+                    Circle()
+                        .stroke(Color.secondary.opacity(0.18), lineWidth: 4)
+                        .frame(width: 58, height: 58)
+                    Circle()
+                        .trim(from: 0, to: 0.28)
+                        .stroke(
+                            LinearGradient(colors: [colorGravedad("INFO"), colorGravedad("INFO").opacity(0.25)],
+                                           startPoint: .top, endPoint: .bottom),
+                            style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                        .frame(width: 58, height: 58)
+                        .rotationEffect(.degrees(latido ? 360 : 0))
+                        .animation(.linear(duration: 0.9).repeatForever(autoreverses: false), value: latido)
+                }
+                Text(app.tarea.isEmpty ? "Trabajando" : app.tarea)
+                    .font(.title3)
+                Text(app.ultimaLinea.isEmpty ? "un momento" : app.ultimaLinea)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: 380)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .animation(.easeInOut(duration: 0.2), value: app.ultimaLinea)
             }
-            .frame(height: 130)
-            .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .textBackgroundColor)))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(nsColor: .separatorColor)))
-            .onChange(of: lineas.count) { _ in
-                if let ultima = lineas.indices.last { lector.scrollTo(ultima, anchor: .bottom) }
-            }
+            .padding(34)
+            .background(RoundedRectangle(cornerRadius: 18).fill(Color(nsColor: .windowBackgroundColor).opacity(0.92)))
+            .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color(nsColor: .separatorColor)))
+            .shadow(color: .black.opacity(0.18), radius: 24, y: 8)
         }
+        .transition(.opacity)
+        .onAppear { latido = true }
     }
 }

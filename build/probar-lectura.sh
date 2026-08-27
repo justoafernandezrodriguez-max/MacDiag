@@ -565,6 +565,41 @@ fi
 comprobar "y NO marca al agente legitimo que usa bash" "" "$m_bueno"
 
 # ---------------------------------------------------------------------------
+printf '\n== Los pasos, y no repetir el mismo problema\n'
+# ---------------------------------------------------------------------------
+#
+# La primera version de la vigilancia saco SEIS criticos que en realidad eran
+# tres problemas: el minero, su reinstalador duplicado y los restos de otro,
+# tambien duplicados. Repetir el mismo aviso tres veces no informa mas, informa
+# peor: quien lo lee no sabe si tiene tres problemas o uno.
+: > "$HALLAZGOS"
+hallazgo "CRITICO" "ARRANQUE" "Algo arranca solo" "detalle" "quitar-arranque:/opt/x" \
+    "Primero esto | Luego lo otro | Y por ultimo esto"
+
+comprobar "el hallazgo guarda sus pasos" \
+    "Primero esto | Luego lo otro | Y por ultimo esto" "$(awk -F'\t' 'NR==1{print $6}' "$HALLAZGOS")"
+comprobar "y son tres" \
+    "3" "$(awk -F'\t' 'NR==1{print $6}' "$HALLAZGOS" | tr '|' '\n' | grep -c .)"
+
+escribir_json "$TRABAJO/pasos.json"
+contiene "el JSON lleva los pasos" "$TRABAJO/pasos.json" '"pasos": "Primero esto'
+
+# Dos ficheros de arranque que apuntan AL MISMO programa son UN problema.
+: > "$TRABAJO/sosp.tsv"
+printf '/var/tmp/.malo.sh\t/Library/LaunchDaemons/uno.plist\tmotivo\tcom.a\n'  >> "$TRABAJO/sosp.tsv"
+printf '/var/tmp/.malo.sh\t/Library/LaunchDaemons/uno 2.plist\tmotivo\tcom.a\n' >> "$TRABAJO/sosp.tsv"
+printf '/opt/otro/otro\t/Library/LaunchDaemons/dos.plist\tmotivo\tcom.b\n'      >> "$TRABAJO/sosp.tsv"
+comprobar "tres ficheros que son dos problemas se agrupan en dos" \
+    "2" "$(cut -f1 "$TRABAJO/sosp.tsv" | sort -u | grep -c .)"
+comprobar "y el que se repite cuenta sus dos ficheros" \
+    "2" "$(awk -F'\t' '$1=="/var/tmp/.malo.sh"' "$TRABAJO/sosp.tsv" | grep -c .)"
+
+# Un hallazgo de cinco campos -de la 0.4.0- se sigue leyendo sin el sexto.
+printf 'AVISO\tVIEJO\tSin pasos\tdetalle\tabrir:algo\n' > "$HALLAZGOS"
+escribir_html "$TRABAJO/cinco.html"
+contiene "un hallazgo sin pasos se sigue leyendo" "$TRABAJO/cinco.html" "Sin pasos"
+
+# ---------------------------------------------------------------------------
 printf '\n== Un informe VACIO, que es el caso que siempre se olvida\n'
 DATOS="$TRABAJO/datos2.tsv"; HALLAZGOS="$TRABAJO/hall2.tsv"; NOPUDE="$TRABAJO/nop2.tsv"
 : > "$DATOS"; : > "$HALLAZGOS"; : > "$NOPUDE"

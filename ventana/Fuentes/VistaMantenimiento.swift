@@ -122,8 +122,6 @@ struct VistaMantenimiento: View {
                 }.padding(.vertical, 20)
                 Spacer()
             }
-
-            Consola(lineas: app.registro)
         }
         .onAppear { cargarMapa() }
         .confirmationDialog("Mandar a la papelera lo marcado",

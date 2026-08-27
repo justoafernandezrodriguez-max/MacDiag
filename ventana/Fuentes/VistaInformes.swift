@@ -69,8 +69,6 @@ struct VistaInformes: View {
                 TableColumn("Disco") { l in Text(l.discoPct + " %") }
                 TableColumn("Sobra") { l in Text(l.liberableGb + " GB") }
             }
-
-            Consola(lineas: app.registro)
         }
         .onAppear { recargar() }
     }

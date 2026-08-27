@@ -18,7 +18,7 @@
 
 # La version va en UN solo sitio, y este es el sitio. Es la leccion de PCDIAG:
 # el dia que el numero vive en tres ficheros, se actualizan dos.
-VERSION_MACDIAG="0.4.0"
+VERSION_MACDIAG="0.5.0"
 
 # ---------------------------------------------------------------------------
 # Decir cosas por pantalla
@@ -194,8 +194,15 @@ datos_ordenados() {
 # no puede arreglarse solo se dice y se lleva al usuario al sitio exacto.
 #
 # Vacio = no hay nada que MacDiag pueda hacer, solo informar.
+# El sexto campo son los PASOS: que hay que hacer, en orden, para arreglarlo.
+# Van separados por " | ".
+#
+# Se guardan aunque MacDiag sepa repararlo solo, y es a proposito: quien usa
+# esto tiene derecho a saber que se le va a hacer al equipo ANTES de pulsar el
+# boton, y a poder hacerlo a mano si prefiere. Un programa que repara sin
+# decir que toca es un programa en el que no se puede confiar.
 hallazgo() {
-    printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "${5:-}" >> "$HALLAZGOS"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "${5:-}" "${6:-}" >> "$HALLAZGOS"
 }
 
 # no_pude <que> <por-que> [ambito]

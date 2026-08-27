@@ -111,7 +111,7 @@ CAJA
         if [ -s "$HALLAZGOS" ]; then
             printf '<h2>Lo que conviene mirar</h2>\n'
             for g in CRITICO AVISO INFO; do
-                while IFS=$'\t' read -r gr et ti de ac; do
+                while IFS=$'\t' read -r gr et ti de ac pasos; do
                     [ "$gr" = "$g" ] || continue
                     quien=""
                     case "$ac" in
@@ -323,11 +323,11 @@ escribir_json() {
         printf '  "hallazgos": [\n'
         primera=1
         if [ -s "$HALLAZGOS" ]; then
-            while IFS=$'\t' read -r gr et ti de ac; do
+            while IFS=$'\t' read -r gr et ti de ac pasos; do
                 [ -n "$gr" ] || continue
                 [ "$primera" -eq 1 ] || printf ',\n'
-                printf '    { "gravedad": "%s", "etiqueta": "%s", "titulo": "%s", "detalle": "%s", "accion": "%s" }' \
-                    "$(esc_json "$gr")" "$(esc_json "$et")" "$(esc_json "$ti")" "$(esc_json "$de")" "$(esc_json "$ac")"
+                printf '    { "gravedad": "%s", "etiqueta": "%s", "titulo": "%s", "detalle": "%s", "accion": "%s", "pasos": "%s" }' \
+                    "$(esc_json "$gr")" "$(esc_json "$et")" "$(esc_json "$ti")" "$(esc_json "$de")" "$(esc_json "$ac")" "$(esc_json "$pasos")"
                 primera=0
             done < "$HALLAZGOS"
         fi

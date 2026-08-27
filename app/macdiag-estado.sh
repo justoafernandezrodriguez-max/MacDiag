@@ -39,6 +39,25 @@ AQUI="$(cd "$(dirname "$0")" && pwd)"
 export LC_ALL=C
 
 # ---------------------------------------------------------------------------
+#  Modo "a fondo": con permiso de administrador
+#
+#      bash macdiag-estado.sh --a-fondo
+#
+#  Hay cosas de este Mac que NO se pueden leer sin permiso, y la mas importante
+#  son los partes de fallo del sistema -los kernel panics-, que es de lo mas
+#  valioso que hay para saber por que un equipo se reinicia solo.
+#
+#  Sin permiso no dan un error: dan una carpeta que PARECE VACIA. Por eso el
+#  informe normal dice "no se ha podido mirar" en vez de "no hay fallos", y por
+#  eso existe este modo: para poder mirarlo de verdad cuando alguien lo pide.
+#
+#  El permiso se pide UNA vez, al principio, diciendo para que es. El resto del
+#  analisis sigue sin necesitarlo.
+# ---------------------------------------------------------------------------
+A_FONDO="no"
+[ "${1:-}" = "--a-fondo" ] && A_FONDO="si"
+
+# ---------------------------------------------------------------------------
 # Donde se deja todo
 #
 # En la raiz de la carpeta de inicio A PROPOSITO, no en ~/Documents. Documentos,
@@ -280,8 +299,23 @@ Paso "Cierres inesperados"
 DIR_SIS="/Library/Logs/DiagnosticReports"
 DIR_USU="$HOME/Library/Logs/DiagnosticReports"
 
-capturar "fallos_sistema_ls"   20 ls -1 "$DIR_SIS"
-capturar "fallos_sistema_30d"  30 find "$DIR_SIS" -maxdepth 1 -type f -mtime -30
+if [ "$A_FONDO" = "si" ]; then
+    # Con permiso se lee de verdad. Se pide aqui y solo para esto.
+    DiFlojo "pidiendo permiso para leer los partes de fallo del sistema"
+    if osascript -e "do shell script \"ls -1 '$DIR_SIS' > '$CRUDO/fallos_sistema_ls.txt' 2>&1; find '$DIR_SIS' -maxdepth 1 -type f -mtime -30 > '$CRUDO/fallos_sistema_30d.txt' 2>&1; chown $(id -u) '$CRUDO/fallos_sistema_ls.txt' '$CRUDO/fallos_sistema_30d.txt'\" with prompt \"MacDiag necesita permiso para leer los partes de fallo del sistema, que dicen por que se ha reiniciado solo el equipo\" with administrator privileges" >/dev/null 2>&1; then
+        printf 'fallos_sistema_ls\t0\t0\tls (con permiso)\n'  >> "$CRUDO/_MANDOS.tsv"
+        printf 'fallos_sistema_30d\t0\t0\tfind (con permiso)\n' >> "$CRUDO/_MANDOS.tsv"
+        DiOk "leidos con permiso de administrador"
+        set_dato "fallos.con_permiso" "si"
+    else
+        DiOjo "sin permiso: se leen como se pueda"
+        capturar "fallos_sistema_ls"   20 ls -1 "$DIR_SIS"
+        capturar "fallos_sistema_30d"  30 find "$DIR_SIS" -maxdepth 1 -type f -mtime -30
+    fi
+else
+    capturar "fallos_sistema_ls"   20 ls -1 "$DIR_SIS"
+    capturar "fallos_sistema_30d"  30 find "$DIR_SIS" -maxdepth 1 -type f -mtime -30
+fi
 capturar "fallos_usuario_ls"   20 ls -1 "$DIR_USU"
 capturar "fallos_usuario_30d"  30 find "$DIR_USU" -maxdepth 1 -type f -mtime -30
 
@@ -341,25 +375,72 @@ done
 # ---------------------------------------------------------------------------
 Paso "Quien arranca solo con el equipo"
 
-N_SOSPECHOSOS=0
+# Se agrupa por el PROGRAMA al que apuntan, no por fichero.
+#
+# La primera version saco seis criticos que en realidad eran tres problemas: el
+# minero, su reinstalador -que estaba duplicado con " 2.plist"- y los restos de
+# otro, tambien duplicados. Es el mismo error de "contar no es mirar" pero al
+# reves: repetir el mismo aviso tres veces no informa mas, informa peor, porque
+# quien lo lee no sabe si tiene tres problemas o uno.
 : > "$CRUDO/_ARRANQUE.tsv"
+: > "$CRUDO/_SOSPECHOSOS.tsv"
 for carpeta in /Library/LaunchDaemons /Library/LaunchAgents "$HOME/Library/LaunchAgents"; do
     [ -d "$carpeta" ] || continue
     for plist in "$carpeta"/*.plist; do
         [ -e "$plist" ] || continue
         prog="$(programa_de_plist "$plist")"
+        arg="$(argumento_de_plist "$plist")"
         motivos="$(motivos_sospecha "$plist")"
-        printf '%s\t%s\t%s\n' "$(basename "$plist")" "${prog:-?}" "$motivos" >> "$CRUDO/_ARRANQUE.tsv"
-        if [ -n "$motivos" ]; then
-            N_SOSPECHOSOS=$(( N_SOSPECHOSOS + 1 ))
-            DiMal "$(basename "$plist"): $motivos"
-            hallazgo "CRITICO" "ARRANQUE" "Arranca solo y no deberia: $(basename "$plist")" \
-                "$motivos. Esta en $carpeta y lanza \"${prog:-?}\". MacDiag no lo quita solo: un elemento de arranque puede ser de algo que si usas, y quitarlo a ciegas rompe programas. Miralo, y si no es tuyo, se quita descargandolo con launchctl y borrando el fichero." \
-                "abrir:arranque"
-        fi
+        printf '%s\t%s\t%s\n' "$plist" "${prog:-?}" "$motivos" >> "$CRUDO/_ARRANQUE.tsv"
+        [ -n "$motivos" ] || continue
+        # El destino de verdad: si lanza bash, lo que importa es el script.
+        destino="$prog"
+        case "${prog##*/}" in bash|sh|zsh) [ -n "$arg" ] && destino="$arg" ;; esac
+        etiq="$(plutil -p "$plist" 2>/dev/null | awk '/"Label"/{sub(/.*=> "/,""); sub(/".*/,""); print; exit}')"
+        printf '%s\t%s\t%s\t%s\n' "$destino" "$plist" "$motivos" "${etiq:-?}" >> "$CRUDO/_SOSPECHOSOS.tsv"
     done
 done
+
+N_SOSPECHOSOS=0
+N_FICHEROS=0
+if [ -s "$CRUDO/_SOSPECHOSOS.tsv" ]; then
+    while IFS= read -r destino; do
+        [ -n "$destino" ] || continue
+        N_SOSPECHOSOS=$(( N_SOSPECHOSOS + 1 ))
+
+        ficheros="$(awk -F'\t' -v d="$destino" '$1==d { print $2 }' "$CRUDO/_SOSPECHOSOS.tsv")"
+        cuantos="$(printf '%s\n' "$ficheros" | grep -c .)"
+        motivos="$(awk -F'\t' -v d="$destino" '$1==d { print $3; exit }' "$CRUDO/_SOSPECHOSOS.tsv")"
+        etiqueta="$(awk -F'\t' -v d="$destino" '$1==d { print $4; exit }' "$CRUDO/_SOSPECHOSOS.tsv")"
+        N_FICHEROS=$(( N_FICHEROS + cuantos ))
+
+        nombre="$(basename "$destino")"
+        if [ "$cuantos" -gt 1 ]; then
+            titulo="\"$nombre\" arranca solo, y hay $cuantos ficheros puestos para que asi sea"
+        else
+            titulo="\"$nombre\" arranca solo con el equipo y no deberia"
+        fi
+
+        lista="$(printf '%s\n' "$ficheros" | sed 's|^|      |' | tr '\n' '@' | sed 's/@/. /g')"
+        DiMal "$nombre  ($cuantos fichero(s) de arranque)"
+
+        # Si ademas se esta comiendo la CPU ahora mismo, se dice AQUI y no en un
+        # hallazgo aparte: es el mismo problema.
+        consumo=""
+        pid_vivo="$(pgrep -f "$destino" 2>/dev/null | head -1)"
+        if [ -n "$pid_vivo" ]; then
+            cpu_vivo="$(ps -p "$pid_vivo" -o pcpu= 2>/dev/null | tr -d ' ')"
+            consumo=" Ahora mismo esta EN MARCHA y se lleva el ${cpu_vivo:-?} % de la CPU."
+        fi
+
+        hallazgo "CRITICO" "ARRANQUE" "$titulo" \
+            "$motivos.$consumo Lo que lo arranca: $(printf '%s' "$ficheros" | tr '\n' ' ')" \
+            "quitar-arranque:$destino" \
+            "MacDiag descarga el arranque con launchctl, para que no vuelva a lanzarse | Para el programa si esta en marcha | Manda los $cuantos fichero(s) de arranque a la papelera, no los destruye | Vuelve a analizar para comprobar que ya no esta | Lo que NO hace: borrar el programa en si ($destino). Eso lo decides tu, porque puede ser de algo que uses"
+    done < <(cut -f1 "$CRUDO/_SOSPECHOSOS.tsv" | sort -u)
+fi
 set_dato "arranque.sospechosos" "$N_SOSPECHOSOS"
+set_dato "arranque.ficheros_sospechosos" "$N_FICHEROS"
 [ "$N_SOSPECHOSOS" -eq 0 ] && DiOk "nada raro en lo que arranca solo"
 
 # ---------------------------------------------------------------------------
@@ -373,18 +454,27 @@ while IFS=$'\t' read -r pid pcpu pmem cmd; do
     [ -n "$pid" ] || continue
     PESADOS=$(( PESADOS + 1 ))
     ruta="$(ruta_de_proceso "$pid")"
+    # Si este programa ya ha salido arriba como arranque sospechoso, NO se
+    # repite: es el mismo problema visto desde otro lado, y repetirlo hace que
+    # quien lo lee no sepa si tiene dos problemas o uno.
+    if [ -s "$CRUDO/_SOSPECHOSOS.tsv" ] && cut -f1 "$CRUDO/_SOSPECHOSOS.tsv" | grep -qxF "$ruta"; then
+        DiFlojo "$cmd: ya contado arriba, en lo que arranca solo"
+        continue
+    fi
     DiOjo "$cmd: $pcpu % de CPU"
     # Un proceso que se come el equipo Y ademas vive donde no debe no es un
     # programa pesado: es otra cosa. Los dos casos se dicen distinto.
     case "$ruta" in
         /opt/*|/tmp/*|/var/tmp/*|/private/tmp/*|/private/var/tmp/*)
             hallazgo "CRITICO" "PROCESOS" "\"$cmd\" se come el $pcpu % de la CPU y arranca desde $ruta" \
-                "Ese sitio no es donde macOS guarda los programas. Un programa que consume asi y ademas vive en una carpeta de paso o en /opt es, casi siempre, algo que no has puesto tu: mineros de criptomonedas y similares. Miralo antes de nada." \
-                "" ;;
+                "Ese sitio no es donde macOS guarda los programas. Un programa que consume asi y ademas vive en una carpeta de paso o en /opt es, casi siempre, algo que no has puesto tu: mineros de criptomonedas y similares." \
+                "parar-proceso:$pid" \
+                "MacDiag para el programa (necesita permiso de administrador) | Comprueba que no vuelve a arrancar solo: si vuelve, es que algo lo relanza y saldra arriba, en lo que arranca solo | Lo que NO hace: borrar el programa. Miralo tu antes en $ruta" ;;
         *)
             hallazgo "AVISO" "PROCESOS" "\"$cmd\" se esta llevando el $pcpu % de la CPU" \
-                "Lleva la CPU muy cargada. Si es algo que has abierto tu -renderizar, comprimir, compilar- es normal y se pasa al terminar. Si no sabes que es, merece una mirada." \
-                "" ;;
+                "Lleva la CPU muy cargada. Si es algo que has abierto tu -renderizar, comprimir, compilar- es normal y se pasa al terminar." \
+                "" \
+                "Mira si es algo que has abierto tu | Si lo es y ha terminado, cierralo desde su propia ventana | Si no sabes que es, buscalo por el nombre antes de tocar nada" ;;
     esac
 done < <(procesos_pesados 70)
 set_dato "procesos.pesados" "$PESADOS"
@@ -405,8 +495,8 @@ set_dato "mem.swap_usado_mb" "${SWAP_USADO_MB:-}"
 if es_numero "$SWAP_USADO_MB"; then
     if [ "$SWAP_USADO_MB" -ge 8192 ]; then
         hallazgo "AVISO" "MEMORIA" "El equipo esta usando $(( SWAP_USADO_MB / 1024 )) GB de disco como si fuera memoria" \
-            "Cuando se acaba la memoria, macOS tira del disco, que es mucho mas lento. Es la explicacion mas comun de que un Mac vaya a tirones sin motivo aparente. Cerrar lo que no se este usando lo baja; si pasa siempre, es que a este equipo le falta memoria para lo que se le pide." \
-            ""
+            "Cuando se acaba la memoria, macOS tira del disco, que es mucho mas lento. Es la explicacion mas comun de que un Mac vaya a tirones sin motivo aparente." \
+            "" "Cierra lo que no estes usando, sobre todo pestanas del navegador | Reinicia si lleva muchos dias encendido | Si pasa siempre, a este Mac le falta memoria para lo que le pides"
     fi
 fi
 
@@ -416,8 +506,8 @@ LIMITE_CPU="$(awk -F'= *' '/CPU_Speed_Limit/ { gsub(/[^0-9]/,"",$2); print $2; e
 set_dato "cpu.limite" "${LIMITE_CPU:-}"
 if es_numero "$LIMITE_CPU" && [ "$LIMITE_CPU" -lt 100 ]; then
     hallazgo "AVISO" "TEMPERATURA" "La CPU esta funcionando al $LIMITE_CPU % de su velocidad" \
-        "El sistema la esta frenando a proposito, y eso pasa por calor o porque algo la tiene al maximo mucho rato. Si el equipo tiene polvo dentro o los ventiladores no van, se queda asi. Mira tambien lo que mas consume, mas arriba." \
-        ""
+        "El sistema la esta frenando a proposito, y eso pasa por calor o porque algo la tiene al maximo mucho rato." \
+        "" "Mira arriba que programa se esta llevando la CPU | Si es algo que has abierto tu, ciarralo al terminar | Si el equipo tiene anos, abrelo y quitale el polvo: el estrangulamiento casi siempre es calor | Si no baja con nada, los ventiladores pueden estar fallando"
 fi
 
 # ---------------------------------------------------------------------------
@@ -432,7 +522,7 @@ if grep -qi 'disabled' "$CRUDO/cortafuegos.txt" 2>/dev/null; then
     set_dato "seg.cortafuegos" "apagado"
     hallazgo "AVISO" "SEGURIDAD" "El cortafuegos esta apagado" \
         "Sin el, cualquier programa de este Mac puede quedarse escuchando conexiones de fuera sin pedirte permiso. En un equipo que se conecta a redes que no son la de casa, conviene encenderlo." \
-        "abrir:cortafuegos"
+        "encender-cortafuegos" "Ajustes del Sistema > Red > Firewall | Enciendelo | Si algun programa tuyo deja de recibir conexiones, en Opciones puedes permitirselo uno a uno"
 elif grep -qi 'enabled' "$CRUDO/cortafuegos.txt" 2>/dev/null; then
     set_dato "seg.cortafuegos" "encendido"
 else
@@ -444,8 +534,8 @@ fi
 if launchctl print system/com.apple.screensharing >/dev/null 2>&1; then
     set_dato "seg.pantalla_compartida" "si"
     hallazgo "AVISO" "SEGURIDAD" "Compartir pantalla esta encendido" \
-        "Alguien con usuario y contrasena de este Mac puede verlo y manejarlo por la red. Si no lo usas, se apaga en Ajustes del Sistema, en General > Compartir." \
-        "abrir:compartir"
+        "Alguien con usuario y contrasena de este Mac puede verlo y manejarlo por la red. Si no lo usas, se apaga en Ajustes del Sistema." \
+        "apagar-compartir" "Ajustes del Sistema > General > Compartir | Apaga 'Compartir pantalla' si no lo usas | Si trabajas en remoto contra este Mac, NO lo apagues: te quedarias fuera"
 else
     set_dato "seg.pantalla_compartida" "no"
 fi
@@ -458,8 +548,8 @@ es_numero "$N_ABIERTOS" || N_ABIERTOS=0
 set_dato "seg.puertos_abiertos" "$N_ABIERTOS"
 if [ "$N_ABIERTOS" -gt 0 ]; then
     hallazgo "INFO" "SEGURIDAD" "Hay $N_ABIERTOS puerto(s) abiertos a toda la red" \
-        "Son programas de este Mac esperando conexiones de fuera, no solo de si mismo. Puede estar perfectamente bien -un servidor que tu has puesto- pero conviene saber cuales son. La lista entera esta en la carpeta crudo, en escuchando.txt." \
-        ""
+        "Son programas de este Mac esperando conexiones de fuera, no solo de si mismo. Puede estar perfectamente bien -un servidor que tu has puesto- pero conviene saber cuales son." \
+        "" "La lista completa esta en la carpeta crudo, en escuchando.txt | Mira si reconoces cada programa | Los que no sean tuyos, ciarralos o desinstalalos | Encender el cortafuegos tapa los que no necesiten estar abiertos"
 fi
 
 # ---------------------------------------------------------------------------
@@ -661,7 +751,7 @@ fi
 case "$(dato seg.filevault)" in
     *"is Off"*) hallazgo "AVISO" "SEGURIDAD" "FileVault esta apagado" \
         "El disco no esta cifrado: quien se lleve el equipo, o el disco, puede leerlo todo sin saber tu contraseña. En un portatil es lo primero que hay que encender." \
-        "abrir:filevault" ;;
+        "filevault-diferido" "Ajustes del Sistema > Privacidad y seguridad | Busca FileVault y pulsa Activar | GUARDA la clave de recuperacion donde no la pierdas: sin ella y sin tu contrasena, el disco no se abre | Cifrar tarda un rato y va en segundo plano; puedes seguir trabajando" ;;
 esac
 
 case "$SIP" in
@@ -686,8 +776,8 @@ fi
 AP="$(dato act.pendientes)"
 if es_numero "$AP" && [ "$AP" -gt 0 ]; then
     hallazgo "AVISO" "SISTEMA" "Hay $AP actualizacion(es) de Apple sin instalar" \
-        "Las de seguridad de macOS no son opcionales en la practica. MacDiag no las instala solo: eso lo tiene que hacer una persona, porque a veces piden reiniciar." \
-        "abrir:actualizaciones"
+        "Las de seguridad de macOS no son opcionales en la practica." \
+        "instalar-actualizaciones" "Ajustes del Sistema > General > Actualizacion de software | Instalar ahora | Algunas piden reiniciar: guarda lo que tengas abierto antes"
 fi
 
 # Las copias de seguridad, sobre el texto y no sobre el codigo de salida (ver
@@ -698,7 +788,7 @@ case "$TM_ESTADO" in
     "sin destino")
         hallazgo "AVISO" "COPIAS" "Este Mac no tiene ningun destino de Time Machine" \
             "No hay copia de seguridad automatica. Un disco externo de los baratos y encenderlo es todo lo que hace falta; sin eso, un disco roto se lo lleva todo." \
-            "abrir:timemachine" ;;
+            "abrir:timemachine" "Conecta un disco externo (vale uno de los baratos) | Ajustes del Sistema > General > Time Machine > Anadir disco | Elige el disco y deja que haga la primera copia, que tarda | Luego se hace sola cada hora" ;;
     "con destino")
         if [ -z "$TM_ULTIMA" ]; then
             no_pude "Cuando fue la ultima copia de Time Machine" \

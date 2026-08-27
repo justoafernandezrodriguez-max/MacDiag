@@ -30,8 +30,10 @@ AQUI="$(cd "$(dirname "$0")" && pwd)"
 
 export LC_ALL=C
 BASE="$HOME/MacDiag"
+NECESITA_REINICIO="no"
 
 ultimo_informe() { ls -1dt "$BASE"/INFORMES/*/ 2>/dev/null | head -1; }
+CRUDO_SOSP="$(ultimo_informe)crudo/_SOSPECHOSOS.tsv"
 
 # ---------------------------------------------------------------------------
 #  Pedir la contrasena SOLO para la accion que la necesita
@@ -50,8 +52,90 @@ con_administrador() {
 # ---------------------------------------------------------------------------
 #  Las acciones
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+#  La cola de cosas que necesitan administrador
+#
+#  Se APUNTAN y se ejecutan TODAS DE UNA VEZ al final, en una sola peticion de
+#  contrasena. Pedirla cinco veces seguidas para cinco arreglos es como enseñar
+#  a alguien a teclear su contrasena sin leer lo que se la pide, que es
+#  exactamente la costumbre que aprovecha el software que no deberia estar ahi.
+#
+#  MacDiag NO ve la contrasena en ningun momento: la pide macOS con su propio
+#  dialogo y ejecuta el mandato ya con permisos.
+# ---------------------------------------------------------------------------
+COLA_ROOT=""
+COLA_QUE=""
+
+encolar_root() {   # <mandato>  <para que>
+    [ -n "$COLA_ROOT" ] && COLA_ROOT="$COLA_ROOT; $1" || COLA_ROOT="$1"
+    [ -n "$COLA_QUE" ] && COLA_QUE="$COLA_QUE, $2" || COLA_QUE="$2"
+}
+
+vaciar_cola_root() {
+    [ -n "$COLA_ROOT" ] || return 0
+    Paso "Permiso de administrador"
+    Di "Hace falta para: $COLA_QUE."
+    Di "Lo pide macOS con su ventana; MacDiag no ve la contrasena."
+    local escapado
+    escapado="$(printf '%s' "$COLA_ROOT" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+    if osascript -e "do shell script \"$escapado\" with prompt \"MacDiag necesita permiso de administrador para: $COLA_QUE\" with administrator privileges" >/dev/null 2>&1; then
+        DiOk "Hecho."
+        COLA_ROOT=""; COLA_QUE=""
+        return 0
+    else
+        DiOjo "Cancelado o sin permiso. No se ha cambiado nada de eso."
+        COLA_ROOT=""; COLA_QUE=""
+        return 1
+    fi
+}
+
 aplicar() {
     case "$1" in
+
+    quitar-arranque:*)
+        # Quitar un arranque son TRES cosas, y en este orden: descargarlo para
+        # que launchd no lo relance, parar el programa si esta vivo, y mandar
+        # los ficheros a la papelera. Si se borra el fichero sin descargarlo,
+        # launchd puede seguir con el en memoria hasta el proximo reinicio y
+        # parece que no ha servido de nada.
+        #
+        # NO se borra el programa en si: puede ser de algo que el usuario use.
+        destino="${1#quitar-arranque:}"
+        Paso "Quitar de el arranque: $(basename "$destino")"
+        if [ ! -s "$CRUDO_SOSP" ]; then
+            DiOjo "No hay analisis reciente. Pulsa Analizar primero."
+            return
+        fi
+        n=0
+        while IFS=$'\t' read -r dest plist motivos etiq; do
+            [ "$dest" = "$destino" ] || continue
+            n=$(( n + 1 ))
+            Di "- $(basename "$plist")"
+            case "$plist" in
+                "$HOME"/*) dominio="gui/$(id -u)" ;;
+                *)         dominio="system" ;;
+            esac
+            encolar_root "launchctl bootout $dominio '$plist' 2>/dev/null || true" "quitar $etiq del arranque"
+            encolar_root "mv '$plist' '$HOME/.Trash/' 2>/dev/null || true" "mandar su fichero a la papelera"
+        done < "$CRUDO_SOSP"
+        if [ "$n" -eq 0 ]; then
+            DiOjo "Ya no esta en la lista: puede que se haya quitado antes."
+            return
+        fi
+        pid_vivo="$(pgrep -f "$destino" 2>/dev/null | head -1)"
+        [ -n "$pid_vivo" ] && encolar_root "kill -9 $pid_vivo 2>/dev/null || true" "parar el programa"
+        DiFlojo "El programa en si ($destino) NO se borra: eso lo decides tu."
+        ;;
+
+    parar-proceso:*)
+        pid="${1#parar-proceso:}"
+        Paso "Parar el proceso $pid"
+        if kill -0 "$pid" 2>/dev/null; then
+            encolar_root "kill -9 $pid 2>/dev/null || true" "parar el proceso $pid"
+        else
+            DiFlojo "Ese proceso ya no esta en marcha."
+        fi
+        ;;
 
     instantanea)
         # El equivalente del punto de restauracion de Windows. No es un
@@ -67,6 +151,47 @@ aplicar() {
             DiFlojo "$salida"
             Di "Suele ser que el disco no es APFS, o que no queda sitio."
         fi
+        ;;
+
+    encender-cortafuegos)
+        Paso "Encender el cortafuegos"
+        encolar_root "/usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate on >/dev/null" "encender el cortafuegos"
+        Di "Si despues algun programa tuyo deja de recibir conexiones, en"
+        Di "Ajustes > Red > Firewall > Opciones se le puede permitir uno a uno."
+        ;;
+
+    apagar-compartir)
+        # OJO: si alguien esta trabajando contra este Mac en remoto, esto le
+        # deja fuera. Por eso se avisa aunque se haga solo.
+        Paso "Apagar Compartir pantalla"
+        Di "AVISO: si ahora mismo hay alguien conectado en remoto a este Mac,"
+        Di "se va a quedar fuera al aplicarse."
+        encolar_root "launchctl disable system/com.apple.screensharing" "apagar Compartir pantalla"
+        encolar_root "launchctl bootout system/com.apple.screensharing 2>/dev/null || true" "cerrar la sesion de pantalla compartida"
+        ;;
+
+    instalar-actualizaciones)
+        # Puede tardar mucho y puede pedir reiniciar. Se instala igualmente y
+        # se AVISA de que hay que reiniciar; reiniciar no lo hace MacDiag, lo
+        # hace el usuario cuando le venga bien.
+        Paso "Instalar las actualizaciones de Apple"
+        Di "Esto puede tardar bastante y descarga de internet. No cierres la ventana."
+        encolar_root "softwareupdate -i -a >/dev/null 2>&1 || true" "instalar las actualizaciones del sistema"
+        NECESITA_REINICIO="si"
+        ;;
+
+    filevault-diferido)
+        # "-defer" es lo unico honesto que se puede automatizar: macOS pide la
+        # contrasena y ensena la clave de recuperacion al siguiente inicio de
+        # sesion. Activarlo del todo a ciegas dejaria la clave de recuperacion
+        # en un fichero, y esa clave es lo unico que salva el disco si se
+        # olvida la contrasena.
+        Paso "Preparar FileVault"
+        encolar_root "fdesetup enable -defer /var/root/.fv-defer.plist >/dev/null 2>&1 || true" "dejar FileVault listo para activarse"
+        Di "Se activara al cerrar y volver a iniciar sesion: macOS te pedira la"
+        Di "contrasena y TE ENSENARA LA CLAVE DE RECUPERACION. Apuntala: sin ella"
+        Di "y sin tu contrasena, el disco no se abre. Ni Apple puede."
+        NECESITA_REINICIO="si"
         ;;
 
     gatekeeper)
@@ -241,6 +366,17 @@ case "${1:-}" in
             [ -n "$a" ] && aplicar "$a"
         done
 
+        vaciar_cola_root
+
+        # Reiniciar NO lo hace MacDiag. Se dice y lo decide el usuario: un
+        # programa que reinicia el equipo por su cuenta se lleva por delante lo
+        # que estuvieras haciendo.
+        if [ "$NECESITA_REINICIO" = "si" ]; then
+            Paso "Falta reiniciar"
+            Di "Algo de lo aplicado no termina hasta que reinicies."
+            Di "MacDiag no reinicia solo a proposito: hazlo tu cuando te venga bien."
+        fi
+
         if [ -n "$manuales" ]; then
             Paso "Esto no lo puede hacer un programa"
             printf '%s' "$manuales" | while IFS='|' read -r a t; do
@@ -251,6 +387,7 @@ case "${1:-}" in
         fi
     else
         for a in "$@"; do aplicar "$a"; done
+        vaciar_cola_root
     fi
     ;;
 

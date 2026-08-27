@@ -348,6 +348,14 @@ while IFS=$'\t' read -r id ruta seguro como titulo explica; do
             DiOjo "$titulo: no se ha podido medir (permisos de privacidad)"
         fi
     fi
+    # Lo que NO EXISTE no se ensena. Ofrecer "borrar los simuladores de Xcode"
+    # en un Mac que no tiene Xcode es ruido: obliga a leer y descartar tres
+    # lineas inutiles para llegar a la que importa. Si no esta, no hay nada
+    # que decidir.
+    if [ "$estado" = "no existe" ]; then
+        continue
+    fi
+
     [ "$primero" -eq 1 ] || SUG_JSON="$SUG_JSON,"
     SUG_JSON="$SUG_JSON
     { \"id\": \"$(esc_json "$id")\", \"titulo\": \"$(esc_json "$titulo")\", \"ruta\": \"$(esc_json "$ruta_real")\", \"gb\": \"${gb:-0}\", \"estado\": \"$(esc_json "$estado")\", \"seguro\": \"$seguro\", \"explica\": \"$(esc_json "$explica")\" }"

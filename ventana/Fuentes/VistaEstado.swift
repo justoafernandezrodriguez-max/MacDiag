@@ -42,13 +42,26 @@ struct VistaEstado: View {
 
                 Button {
                     reparar(soloMarcados: false)
-                } label: { Label("2 - Reparar", systemImage: "wrench.and.screwdriver") }
-                    .disabled(app.informe == nil)
+                } label: { Label("2 - Reparar todo", systemImage: "wrench.and.screwdriver") }
+                    .disabled(app.informe == nil || cuantosReparables == 0)
+                    .help("Arregla las \(cuantosReparables) cosa(s) que MacDiag puede arreglar solo. La contrasena de administrador se pide UNA vez para todas.")
 
                 Button {
                     reparar(soloMarcados: true)
-                } label: { Label("Reparar lo seleccionado", systemImage: "checklist") }
+                } label: { Label("Reparar lo marcado", systemImage: "checklist") }
                     .disabled(app.marcados.isEmpty)
+                    .help("Arregla solo las lineas que hayas marcado.")
+
+                Button {
+                    // Analiza pidiendo permiso de administrador, que hace falta
+                    // para leer los partes de fallo del sistema. Sin el, esa
+                    // carpeta parece vacia y no se puede distinguir "no hay
+                    // fallos" de "no he podido mirar".
+                    app.ejecutar("macdiag-estado.sh", argumentos: ["--a-fondo"],
+                                 titulo: "Analizando a fondo, con permisos",
+                                 recargarAlFinal: true)
+                } label: { Label("Analizar a fondo", systemImage: "lock.open") }
+                    .help("Pide la contrasena de administrador una vez, para poder leer los partes de fallo del sistema. Sin ella esa carpeta parece vacia.")
 
                 Divider().frame(height: 18)
 
@@ -128,7 +141,6 @@ struct VistaEstado: View {
             }
 
             Spacer()
-            Consola(lineas: app.registro)
         }
         .confirmationDialog("Crear un punto de restauracion",
                             isPresented: $confirmarInstantanea, titleVisibility: .visible) {
@@ -144,6 +156,11 @@ struct VistaEstado: View {
             Ocupa poco al principio y va creciendo segun cambian los ficheros. El sistema la borra sola cuando necesita espacio.
             """)
         }
+    }
+
+    /// Cuantas cosas puede arreglar MacDiag por su cuenta.
+    private var cuantosReparables: Int {
+        (app.informe?.hallazgos ?? []).filter { $0.loArreglaMacDiag }.count
     }
 
     /// Lo peor arriba, siempre.
@@ -202,11 +219,40 @@ struct FilaHallazgo: View {
                     .fixedSize(horizontal: false, vertical: true)
                 // La columna "Lo arregla" de PCDIAG. Sin ella, alguien pulsa
                 // Reparar, no pasa nada visible, y concluye que no sirve.
-                Text(h.quienLoArregla)
-                    .font(.caption2)
-                    .foregroundColor(h.sePuedeReparar ? colorGravedad("INFO") : .secondary.opacity(0.8))
+                HStack(spacing: 8) {
+                    Image(systemName: h.loArreglaMacDiag ? "wand.and.stars"
+                                    : h.loHaceUnaPersona ? "hand.raised" : "info.circle")
+                        .font(.caption2)
+                    Text(h.quienLoArregla).font(.caption2)
+                }
+                .foregroundColor(h.sePuedeReparar ? colorGravedad("INFO") : .secondary.opacity(0.8))
+
+                // Los pasos, uno a uno. Se enseñan aunque MacDiag sepa hacerlo
+                // solo: quien pulsa "Reparar" tiene derecho a saber antes que
+                // se le va a tocar al equipo.
+                if !h.listaPasos.isEmpty {
+                    DisclosureGroup("Como se arregla, paso a paso") {
+                        VStack(alignment: .leading, spacing: 5) {
+                            ForEach(Array(h.listaPasos.enumerated()), id: \.offset) { i, paso in
+                                HStack(alignment: .top, spacing: 7) {
+                                    Text("\(i + 1)")
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundColor(.white)
+                                        .frame(width: 16, height: 16)
+                                        .background(Circle().fill(colorGravedad("INFO").opacity(0.85)))
+                                    Text(paso)
+                                        .font(.caption)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                        .padding(.top, 5).padding(.leading, 2)
+                    }
+                    .font(.caption)
+                    .padding(.top, 2)
+                }
             }
             Spacer()
-        }.padding(.vertical, 4)
+        }.padding(.vertical, 5)
     }
 }

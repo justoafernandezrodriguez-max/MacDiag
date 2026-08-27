@@ -27,6 +27,21 @@ struct Hallazgo: Codable, Identifiable, Hashable {
     /// cualquier otra cosa = MacDiag lo hace solo.
     let accion: String?
 
+    /// Los pasos para arreglarlo, separados por " | ". Se enseñan aunque
+    /// MacDiag sepa hacerlo solo: quien usa esto tiene derecho a saber que se
+    /// le va a tocar al equipo antes de pulsar el boton.
+    let pasos: String?
+
+    var listaPasos: [String] {
+        (pasos ?? "").components(separatedBy: " | ")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+
+    /// Lo que empieza por "abrir:" necesita a una persona; lo demas lo hace
+    /// MacDiag solo.
+    var loArreglaMacDiag: Bool { sePuedeReparar && !loHaceUnaPersona }
+
     var sePuedeReparar: Bool { !(accion ?? "").isEmpty }
     var loHaceUnaPersona: Bool { (accion ?? "").hasPrefix("abrir:") }
 
