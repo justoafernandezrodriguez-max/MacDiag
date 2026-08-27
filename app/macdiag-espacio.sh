@@ -69,6 +69,34 @@ contenido_a_la_papelera() {
 }
 
 # ---------------------------------------------------------------------------
+#  La papelera, que es un caso aparte
+#
+#  macOS no deja medirla con "du" -contesta "Operation not permitted"- pero el
+#  Finder si puede mirarla, porque el permiso lo tiene el.
+#
+#  Esto importa mas de lo que parece: sin preguntarle al Finder, la papelera
+#  salia siempre como "no se ha podido medir", incluso estando VACIA. Y vacia y
+#  no-he-podido-mirar no son lo mismo, que es la regla de la que cuelga medio
+#  proyecto. Ahora se distinguen los tres casos: vacia, medida, o no se sabe.
+# ---------------------------------------------------------------------------
+papelera_cuantos() {
+    osascript -e 'tell application "Finder" to return count of items of the trash' 2>/dev/null
+}
+
+# Devuelve:  <kilobytes>  <cuantos elementos han dado tamano>
+#
+# El Finder sabe lo que ocupa un FICHERO, pero de una CARPETA contesta "missing
+# value": no lo calcula al vuelo. Asi que la suma puede dejarse elementos
+# fuera, y entonces la cifra es un minimo y hay que decirlo. Es lo mismo que ya
+# pasaba con "du" y las carpetas de privacidad: un total al que le falta un
+# trozo no se presenta como si estuviera completo.
+papelera_kb() {
+    osascript -e 'tell application "Finder" to return size of every item of the trash' 2>/dev/null \
+        | tr ',' '\n' \
+        | awk '$1 ~ /^[0-9]+$/ { s += $1; n++ } END { printf "%d %d", s/1024, n+0 }'
+}
+
+# ---------------------------------------------------------------------------
 #  Las carpetas candidatas
 #
 #  campo 1: id        (lo que manda la ventana al borrar)
@@ -131,16 +159,81 @@ if [ "${1:-}" = "--borrar" ]; then
 fi
 
 # ---------------------------------------------------------------------------
+#  Mandar a la papelera una carpeta o un fichero concreto
+#
+#      bash macdiag-espacio.sh --borrar-ruta "/ruta/de/la/cosa"
+#
+#  Las sugerencias de arriba son una lista cerrada a proposito, pero hace falta
+#  poder senalar algo concreto: es lo que permite probar el mecanismo sin tocar
+#  las carpetas del sistema, y lo que usara la ventana el dia que deje elegir
+#  una carpeta a mano.
+# ---------------------------------------------------------------------------
+if [ "${1:-}" = "--borrar-ruta" ]; then
+    shift
+    Paso "Mandando a la papelera"
+    n=0
+    for ruta in "$@"; do
+        if [ ! -e "$ruta" ]; then
+            DiOjo "no existe: $ruta"
+            continue
+        fi
+        # No se deja borrar cualquier cosa. Las carpetas de arriba del arbol y
+        # las del sistema no se tocan ni por equivocacion: un fallo aqui no
+        # tiene gracia ninguna.
+        case "$ruta" in
+            "$HOME"|"$HOME/"|/|/System*|/Library*|/usr*|/bin*|/sbin*|/Applications*)
+                DiMal "me niego a tocar $ruta"; continue ;;
+        esac
+        tam="$(du -sh "$ruta" 2>/dev/null | awk '{print $1}')"
+        if a_la_papelera "$ruta"; then
+            DiOk "a la papelera: $(basename "$ruta") (${tam:-?})"
+            n=$(( n + 1 ))
+        else
+            DiMal "no se ha podido mover: $ruta"
+        fi
+    done
+    Di "$n elemento(s). Siguen en la papelera: se pueden sacar de ahi."
+    exit 0
+fi
+
+# ---------------------------------------------------------------------------
 #  Vaciar la papelera. Esto SI es definitivo, y por eso va aparte.
 # ---------------------------------------------------------------------------
 if [ "${1:-}" = "--vaciar-papelera" ]; then
     Paso "Vaciando la papelera"
-    n=0
-    for cosa in "$HOME/.Trash"/* "$HOME/.Trash"/.??*; do
-        [ -e "$cosa" ] || continue
-        rm -rf "$cosa" 2>/dev/null && n=$(( n + 1 ))
-    done
-    DiOk "papelera del usuario: $n elemento(s) borrados"
+
+    # PRIMERO: se puede siquiera MIRAR la papelera?
+    #
+    # Esto se vio probandolo: macOS protege ~/.Trash con el permiso de
+    # privacidad, asi que "ls" contesta "Operation not permitted" mientras que
+    # "mv" hacia dentro si funciona. Consecuencia: el bucle de abajo recorria
+    # una lista vacia y esto decia tan tranquilo "0 elementos borrados", que es
+    # la mentira exacta que este proyecto no se permite: no habia mirado.
+    #
+    # Si no se puede leer, se lo pedimos al Finder, que si tiene permiso. Y si
+    # el Finder tampoco, se dice y no se finge.
+    if ! ls "$HOME/.Trash" >/dev/null 2>&1; then
+        DiOjo "macOS no deja a MacDiag mirar dentro de la papelera (permiso de privacidad)."
+        DiFlojo "Se lo pido al Finder, que si puede."
+        if osascript -e 'tell application "Finder" to empty the trash' >/dev/null 2>&1; then
+            DiOk "Papelera vaciada por el Finder."
+        else
+            DiMal "El Finder tampoco ha podido, o se ha cancelado el permiso."
+            Di ""
+            Di "Dos salidas, y las dos las decides tu:"
+            Di "  - Vaciarla a mano: clic derecho en la papelera del Dock."
+            Di "  - O dar Acceso total al disco a MacDiag en Ajustes del Sistema >"
+            Di "    Privacidad y seguridad, y volver a intentarlo."
+            exit 1
+        fi
+    else
+        n=0
+        for cosa in "$HOME/.Trash"/* "$HOME/.Trash"/.??*; do
+            [ -e "$cosa" ] || continue
+            rm -rf "$cosa" 2>/dev/null && n=$(( n + 1 ))
+        done
+        DiOk "papelera del usuario: $n elemento(s) borrados"
+    fi
 
     # Las papeleras de los discos externos son otra carpeta distinta, y es de
     # las cosas que mas sitio ocupan sin que nadie caiga.
@@ -223,6 +316,33 @@ while IFS=$'\t' read -r id ruta seguro como titulo explica; do
                 TOTAL_SEGURO="$(awk -v a="$TOTAL_SEGURO" -v b="$gb" 'BEGIN{printf "%.1f", a+b}')"
             fi
             DiFlojo "$titulo: $gb GB"
+        elif [ "$id" = "papelera" ]; then
+            # du no ha podido; se lo preguntamos al Finder antes de rendirnos.
+            n_pap="$(papelera_cuantos)"
+            if [ "$n_pap" = "0" ]; then
+                gb="0"; estado="vacia"
+                DiOk "$titulo: vacia"
+            elif es_numero "$n_pap"; then
+                set -- $(papelera_kb)
+                kb_pap="${1:-0}"; medidos="${2:-0}"
+                if es_numero "$kb_pap" && [ "$kb_pap" -gt 0 ]; then
+                    gb="$(gb_de_kb "$kb_pap")"
+                    TOTAL_SEGURO="$(awk -v a="$TOTAL_SEGURO" -v b="$gb" 'BEGIN{printf "%.1f", a+b}')"
+                    if [ "$medidos" -lt "$n_pap" ]; then
+                        estado="medido en parte"
+                        DiOjo "$titulo: $gb GB como minimo ($medidos de $n_pap elementos; del resto, que son carpetas, el Finder no sabe el tamano)"
+                    else
+                        estado="medido"
+                        DiFlojo "$titulo: $gb GB en $n_pap elemento(s), segun el Finder"
+                    fi
+                else
+                    estado="no se ha podido medir"
+                    DiOjo "$titulo: hay $n_pap elemento(s), pero no se ha podido saber cuanto ocupan"
+                fi
+            else
+                estado="no se ha podido medir"
+                DiOjo "$titulo: no se ha podido medir (permisos de privacidad)"
+            fi
         else
             estado="no se ha podido medir"
             DiOjo "$titulo: no se ha podido medir (permisos de privacidad)"

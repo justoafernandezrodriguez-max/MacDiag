@@ -448,6 +448,34 @@ escribir_html "$TRABAJO/viejo.html"
 contiene "un hallazgo antiguo de 4 campos se sigue leyendo" "$TRABAJO/viejo.html" "Sin quinto campo"
 
 # ---------------------------------------------------------------------------
+printf '\n== El borrado: lo que NO se deja tocar\n'
+# ---------------------------------------------------------------------------
+#
+# El motor de espacio puede mandar a la papelera una ruta concreta. Eso hace
+# falta, pero una lista de rutas que llega de fuera y se borra sin mirar es
+# justo donde un fallo tonto se convierte en un desastre. Se comprueba que se
+# niega a tocar el home entero y las carpetas del sistema.
+#
+# No se borra nada de verdad aqui: se comprueba que se NIEGA.
+ESPACIO="$RAIZ/app/macdiag-espacio.sh"
+for prohibida in "$HOME" "/" "/System" "/Library" "/Applications" "/usr"; do
+    salida="$(bash "$ESPACIO" --borrar-ruta "$prohibida" 2>&1)"
+    if printf '%s' "$salida" | grep -q "me niego a tocar"; then
+        BIEN=$(( BIEN + 1 )); printf '  ok    se niega a tocar %s\n' "$prohibida"
+    else
+        MAL=$(( MAL + 1 )); printf '  MAL   NO se ha negado a tocar %s\n' "$prohibida"
+    fi
+done
+
+# Una ruta que no existe se dice, no se calla ni se da por hecha.
+salida="$(bash "$ESPACIO" --borrar-ruta "$TRABAJO/esto-no-existe-de-verdad" 2>&1)"
+if printf '%s' "$salida" | grep -q "no existe"; then
+    BIEN=$(( BIEN + 1 )); printf '  ok    una ruta que no existe se dice\n'
+else
+    MAL=$(( MAL + 1 )); printf '  MAL   una ruta que no existe no se ha dicho\n'
+fi
+
+# ---------------------------------------------------------------------------
 printf '\n== Un informe VACIO, que es el caso que siempre se olvida\n'
 DATOS="$TRABAJO/datos2.tsv"; HALLAZGOS="$TRABAJO/hall2.tsv"; NOPUDE="$TRABAJO/nop2.tsv"
 : > "$DATOS"; : > "$HALLAZGOS"; : > "$NOPUDE"
