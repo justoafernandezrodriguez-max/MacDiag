@@ -569,6 +569,152 @@ fi
 comprobar "y NO marca al agente legitimo que usa bash" "" "$m_bueno"
 
 # ---------------------------------------------------------------------------
+printf '\n== Lo que salio torcido en el primer MacBook ajeno\n'
+# ---------------------------------------------------------------------------
+#
+# Estas capturas NO estan imitadas: son la forma literal de los plists de un
+# MacBook Pro de 2018 con Sequoia, Adobe, OneDrive y Canon puestos, el
+# 2-sep-2026. En el iMac de desarrollo no habia software comercial de este
+# tipo, asi que el detector se estreno alli con diez arranques limpios y cinco
+# de un minero, y parecia que no fallaba. En cuanto vio un Mac de alguien saco
+# CINCO criticos de los que CUATRO eran mentira.
+#
+# El fallo de raiz era uno solo: el lector entraba en "ProgramArguments" y no
+# paraba al cerrar el array, asi que se llevaba el valor de la clave de al
+# lado. Es la trampa de los campos vacios que se tragan el siguiente -que ya
+# tiene su propia seccion mas arriba- aparecida en otro sitio.
+#
+# plutil -p ordena las claves alfabeticamente, y de ahi la mala suerte: detras
+# de "ProgramArguments" caen justo "SpawnConstraint" y "StandardErrorPath".
+
+# 1. OneDrive: ProgramArguments VACIO, un Program bueno, y debajo la firma.
+#    Se leia "com.microsoft.OneDriveStandaloneUpdaterDaemon" como si fuera el
+#    programa, y como eso no es un fichero, se declaraba roto.
+cat > "$FALSOS/onedrive.plist" <<'FIN'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>com.microsoft.OneDriveStandaloneUpdaterDaemon</string>
+<key>MachServices</key><dict><key>com.microsoft.OneDriveStandaloneUpdaterDaemon</key><true/></dict>
+<key>Program</key><string>/bin/ls</string>
+<key>ProgramArguments</key><array/>
+<key>SpawnConstraint</key><dict>
+  <key>signing-identifier</key><string>com.microsoft.OneDriveStandaloneUpdaterDaemon</string>
+  <key>team-identifier</key><string>UBF8T346G9</string>
+</dict>
+<key>StandardErrorPath</key><string>/Library/Logs/Microsoft/OneDrive/x.log</string>
+</dict></plist>
+FIN
+comprobar "con ProgramArguments vacio se lee el Program, no la firma de abajo" \
+    "/bin/ls" "$(programa_de_plist "$FALSOS/onedrive.plist")"
+comprobar "y un demonio firmado y entero no se denuncia" \
+    "" "$(motivos_sospecha "$FALSOS/onedrive.plist")"
+
+# 2. Adobe: UN argumento, y debajo un StandardErrorPath en /tmp. Escribir el
+#    registro de errores en /tmp no es arrancar nada de /tmp, pero se leia esa
+#    ruta como el segundo argumento y se le acusaba de eso mismo.
+cat > "$FALSOS/adobe.plist" <<'FIN'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>Adobe_Genuine_Software_Integrity_Service</string>
+<key>Nice</key><integer>1</integer>
+<key>ProgramArguments</key><array><string>/bin/ls</string></array>
+<key>RunAtLoad</key><true/>
+<key>StandardErrorPath</key><string>/tmp/AlTest1.err</string>
+<key>StandardOutPath</key><string>/tmp/AlTest1.out</string>
+<key>StartInterval</key><integer>21600</integer>
+</dict></plist>
+FIN
+comprobar "con un solo argumento, el segundo esta VACIO y no es la clave siguiente" \
+    "" "$(argumento_de_plist "$FALSOS/adobe.plist")"
+comprobar "y el registro de errores en /tmp no es arrancar algo de /tmp" \
+    "" "$(motivos_sospecha "$FALSOS/adobe.plist")"
+
+# 3. Canon: lanza "rm -rf" y "rm" es un mando suelto, no una ruta. Preguntarle
+#    a un mando suelto si existe como fichero da que no, y salia un hallazgo
+#    critico titulado "rm" sobre un programa que no existia. /bin/rm existe.
+cat > "$FALSOS/canon-rm.plist" <<'FIN'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>jp.co.canon.ij.rp.photoservice.webinstaller</string>
+<key>ProgramArguments</key><array><string>rm</string><string>-rf</string><string>mAWI</string></array>
+<key>RunAtLoad</key><true/>
+<key>WorkingDirectory</key><string>/var/folders/pp/x/T</string>
+</dict></plist>
+FIN
+comprobar "un mando suelto se lee tal cual"        "rm" "$(programa_de_plist "$FALSOS/canon-rm.plist")"
+comprobar "y el segundo argumento tambien"         "-rf" "$(argumento_de_plist "$FALSOS/canon-rm.plist")"
+comprobar "y NO se dice que /bin/rm no exista"     "" "$(motivos_sospecha "$FALSOS/canon-rm.plist")"
+
+# 4. Pero un mando suelto que de verdad no esta SI se denuncia. Si no, el
+#    arreglo de arriba habria apagado la regla entera, que es la forma mas
+#    silenciosa de romper un comprobador: dejar de comprobar.
+cat > "$FALSOS/mando-fantasma.plist" <<'FIN'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>es.macdiag.mando.fantasma</string>
+<key>ProgramArguments</key><array><string>estonoexistecomomando</string></array>
+</dict></plist>
+FIN
+if printf '%s' "$(motivos_sospecha "$FALSOS/mando-fantasma.plist")" | grep -q "no existe"; then
+    BIEN=$(( BIEN + 1 )); printf '  ok    un mando que NO esta en el PATH sigue denunciandose\n'
+else
+    MAL=$(( MAL + 1 )); printf '  MAL   ha dejado de ver un mando que no existe\n'
+fi
+
+# 5. Y el resto de verdad de aquel MacBook: Canon dejo puesto un demonio que
+#    apunta a un ayudante que ya no esta. Ese hallazgo era el unico correcto de
+#    los cinco y tiene que seguir saliendo.
+cat > "$FALSOS/canon-resto.plist" <<'FIN'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>jp.co.canon.MasterInstaller</string>
+<key>Program</key><string>/Library/PrivilegedHelperTools/jp.co.canon.NoEstaAqui</string>
+<key>ProgramArguments</key><array><string>/Library/PrivilegedHelperTools/jp.co.canon.NoEstaAqui</string></array>
+<key>ServiceIPC</key><integer>1</integer>
+<key>Sockets</key><dict><key>MasterSocket</key><dict>
+  <key>SockFamily</key><string>Unix</string>
+</dict></dict>
+</dict></plist>
+FIN
+if printf '%s' "$(motivos_sospecha "$FALSOS/canon-resto.plist")" | grep -q "no existe"; then
+    BIEN=$(( BIEN + 1 )); printf '  ok    el resto que apunta a un ayudante borrado sigue saltando\n'
+else
+    MAL=$(( MAL + 1 )); printf '  MAL   ya no ve el resto que apunta a un programa borrado\n'
+fi
+comprobar "y con un solo argumento no se inventa un segundo desde Sockets" \
+    "" "$(argumento_de_plist "$FALSOS/canon-resto.plist")"
+
+# ---------------------------------------------------------------------------
+printf '\n== De quien es el proceso que se va a matar\n'
+# ---------------------------------------------------------------------------
+#
+# Esto no es cosmetica. El PID que sale de aqui va derecho a un kill -9 COMO
+# ROOT en el boton de quitar un arranque. Antes se buscaba con pgrep -f, que
+# casa por trozo de texto contra la linea de mandos entera: con "rm" devolvia
+# once procesos de un Mac normal -theRMalmonitord, useRManagerd, theRMald- y el
+# informe llego a decir que "rm" estaba EN MARCHA al 0,0 % de CPU cuando quien
+# estaba en marcha era thermalmonitord. Quitar ese arranque habria matado un
+# demonio del sistema. No llego a pasar porque ese boton nunca se ha pulsado.
+
+comprobar "un mando suelto no se atribuye ningun proceso" "" "$(pid_del_programa rm)"
+comprobar "ni un programa que no existe"                  "" "$(pid_del_programa /no/existe/de/verdad)"
+
+# Y el caso positivo, que es el que impide que esto se quede en un comprobador
+# que no salta nunca: se lanza un proceso conocido y tiene que encontrarlo.
+/bin/sleep 20 &
+PID_SLEEP=$!
+sleep 1
+comprobar "pero a un proceso de verdad SI lo encuentra, por su ruta" \
+    "$PID_SLEEP" "$(pid_del_programa /bin/sleep)"
+kill "$PID_SLEEP" 2>/dev/null
+wait "$PID_SLEEP" 2>/dev/null
+
+# ---------------------------------------------------------------------------
 printf '\n== Los pasos, y no repetir el mismo problema\n'
 # ---------------------------------------------------------------------------
 #

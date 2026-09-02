@@ -18,19 +18,135 @@
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-#  El programa que arranca un plist
+#  Leer un plist de arranque
+#
+#  ESTO SE PAGO EN UN MACBOOK AJENO, el 2-sep-2026, y de las cuatro maneras a
+#  la vez. La version anterior buscaba "ProgramArguments" y a partir de ahi se
+#  llevaba la primera linea que tuviera un => ", SIN PARAR AL CERRAR EL ARRAY.
+#  Cuando el array esta vacio -o tiene menos elementos de los que se piden- eso
+#  no devuelve nada: devuelve el valor de LA CLAVE SIGUIENTE del plist.
+#
+#  Lo que salio en un MacBook de verdad, con Adobe, OneDrive y Canon puestos:
+#
+#    - Los dos demonios de OneDrive tienen "ProgramArguments" VACIO y un
+#      "Program" bueno al lado. Se leia el "signing-identifier" de mas abajo y
+#      se los declaraba CRITICOS por "apuntar a un programa que no existe".
+#      Dos falsos positivos sobre software firmado por Microsoft.
+#
+#    - El de Adobe tiene UN argumento y un "StandardErrorPath" de /tmp debajo.
+#      Se leia esa ruta como si fuera el segundo argumento y se le acusaba de
+#      "arrancar algo de una carpeta de ficheros temporales". Escribir el
+#      registro de errores en /tmp no es arrancar nada de /tmp.
+#
+#  Es la trampa de los campos vacios que se tragan el siguiente -la que ya
+#  tiene su propia seccion en las pruebas- otra vez y en otro sitio. Por eso
+#  ahora se lee el array como un array: se entra al abrir y SE SALE AL CERRAR.
 # ---------------------------------------------------------------------------
+
+# Un elemento de ProgramArguments por posicion: 0 es el programa, 1 el primer
+# argumento. No devuelve nada si el array no llega a esa posicion, que es
+# justo lo que tiene que pasar.
+argv_de_plist() {
+    plutil -p "$1" 2>/dev/null | awk -v q="${2:-0}" '
+        /"ProgramArguments"[ \t]*=>[ \t]*\[/ { dentro = 1; n = 0; next }
+        dentro && /^[ \t]*\]/              { exit }
+        dentro && /^[ \t]*[0-9]+[ \t]*=>[ \t]*"/ {
+            if (n == q) {
+                i = index($0, "=> \"")
+                v = substr($0, i + 4); sub(/".*/, "", v)
+                print v; exit
+            }
+            n++
+        }'
+}
+
+# El valor de una clave de primer nivel. Se compara la clave ENTERA, para que
+# "Program" no case con "ProgramArguments" ni con la primera clave anidada que
+# pase por ahi.
+valor_de_clave() {
+    plutil -p "$1" 2>/dev/null | awk -v clave="\"$2\"" '
+        $1 == clave {
+            i = index($0, "=> \"")
+            if (i) { v = substr($0, i + 4); sub(/".*/, "", v); print v; exit }
+        }'
+}
+
+# El programa que arranca un plist. Puede venir como ProgramArguments[0] o como
+# la clave Program, y hay plists que traen las dos con el array vacio.
 programa_de_plist() {
     local f="$1"; local p
-    p="$(plutil -p "$f" 2>/dev/null | awk '/"ProgramArguments"/{d=1} d && /=> "/{sub(/.*=> "/,""); sub(/".*/,""); print; exit}')"
-    [ -n "$p" ] || p="$(plutil -p "$f" 2>/dev/null | awk '/"Program"/{sub(/.*=> "/,""); sub(/".*/,""); print; exit}')"
+    p="$(argv_de_plist "$f" 0)"
+    [ -n "$p" ] || p="$(valor_de_clave "$f" Program)"
     printf '%s' "$p"
 }
 
 # El segundo argumento, que es donde suele estar el script de verdad cuando el
 # primero es /bin/bash.
 argumento_de_plist() {
-    plutil -p "$1" 2>/dev/null | awk '/"ProgramArguments"/{d=1;n=0} d && /=> "/{n++; if(n==2){sub(/.*=> "/,""); sub(/".*/,""); print; exit}}'
+    argv_de_plist "$1" 1
+}
+
+# La etiqueta con la que se conoce a si mismo el arranque.
+etiqueta_de_plist() {
+    valor_de_clave "$1" Label
+}
+
+# ---------------------------------------------------------------------------
+#  Donde esta de verdad el programa de un arranque
+#
+#  Devuelve la ruta, o nada si no se encuentra. Y el motivo de que exista:
+#  launchd acepta un mando suelto -"rm"- y lo busca en el PATH igual que la
+#  Terminal. Preguntarle a un mando suelto si existe COMO FICHERO da que no, y
+#  eso es lo que pasaba: un agente de Canon que lanza "rm -rf" se denunciaba
+#  como un programa llamado "rm" que no existia. /bin/rm existe desde 1971.
+#
+#  Y no, esto no es la trampa 11 ("estar no es funcionar"). Alli la pregunta
+#  era si un programa SIRVE, y para eso hay que probarlo. Aqui la pregunta es
+#  si el fichero al que apunta un arranque sigue estando, que es exactamente lo
+#  que command -v contesta.
+# ---------------------------------------------------------------------------
+ruta_de_programa() {
+    local p="${1:-}"
+    [ -n "$p" ] || return 0
+    case "$p" in
+        /*) [ -e "$p" ] && printf '%s' "$p" ;;
+        *)  command -v "$p" 2>/dev/null || true ;;
+    esac
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+#  El proceso vivo de un arranque, si lo hay
+#
+#  Se usa para decir "ademas ahora mismo esta en marcha" y -esto es lo serio-
+#  para el kill del boton de quitar arranques.
+#
+#  Antes era  pgrep -f "$destino", que casa por TROZO DE TEXTO contra la linea
+#  de mandos entera. Con destino "rm" eso devuelve once procesos en un Mac
+#  normal: theRMalmonitord, useRManagerd, theRMald, containeRManagerd... El
+#  informe llego a decir que "rm" estaba EN MARCHA al 0,0 % de CPU, y lo que
+#  estaba en marcha era thermalmonitord. En el reparador ese mismo PID iba a un
+#  kill -9 COMO ROOT: el boton de quitar un arranque habria matado un demonio
+#  del sistema. No llego a pasar porque ese boton nunca se ha llegado a pulsar.
+#
+#  Ahora: nombre exacto con pgrep -x, y ademas se confirma que el proceso que
+#  sale es de verdad ESE fichero y no otro que se llame igual. Si el arranque
+#  es un mando suelto no se puede saber cual de los "rm" del sistema es el
+#  suyo, asi que no se dice nada. Callar es lo correcto cuando no se sabe.
+# ---------------------------------------------------------------------------
+pid_del_programa() {
+    local d="${1:-}" p
+    case "$d" in
+        /*) : ;;
+        *)  return 0 ;;
+    esac
+    for p in $(pgrep -x "$(basename "$d")" 2>/dev/null); do
+        if [ "$(ps -p "$p" -o comm= 2>/dev/null)" = "$d" ]; then
+            printf '%s' "$p"
+            return 0
+        fi
+    done
+    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -92,7 +208,11 @@ motivos_sospecha() {
     # 4. Apunta a algo que ya no existe. Suele ser un resto: alguien quito el
     #    programa y dejo el arranque, que sigue intentandolo cada pocos
     #    segundos para siempre.
-    if [ -n "$prog" ] && [ ! -e "$prog" ]; then
+    #
+    #    Se busca por ruta_de_programa y no con [ -e ] a secas porque un
+    #    arranque puede nombrar un mando suelto, que vive en el PATH. Ver el
+    #    comentario de esa funcion: aqui se acuso a /bin/rm de no existir.
+    if [ -n "$prog" ] && [ -z "$(ruta_de_programa "$prog")" ]; then
         anadir "apunta a un programa que no existe ($prog)"
     elif [ -n "$arg" ] && [ "${prog##*/}" = "bash" ] && [ ! -e "$arg" ]; then
         anadir "apunta a un script que no existe ($arg)"

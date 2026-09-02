@@ -27,6 +27,9 @@
 
 AQUI="$(cd "$(dirname "$0")" && pwd)"
 . "$AQUI/lib-comun.sh"
+# Hace falta por pid_del_programa: quitar un arranque acaba en un kill -9 como
+# root, y de quien es ese PID se encarga esa funcion y nadie mas.
+. "$AQUI/lib-vigilancia.sh"
 
 export LC_ALL=C
 BASE="$HOME/MacDiag"
@@ -122,7 +125,10 @@ aplicar() {
             DiOjo "Ya no esta en la lista: puede que se haya quitado antes."
             return
         fi
-        pid_vivo="$(pgrep -f "$destino" 2>/dev/null | head -1)"
+        # OJO con como se busca este PID: va derecho a un kill -9 como root.
+        # Con pgrep -f, que casa por trozo de texto, quitar un arranque llamado
+        # "rm" habria matado thermalmonitord. Ver pid_del_programa.
+        pid_vivo="$(pid_del_programa "$destino")"
         [ -n "$pid_vivo" ] && encolar_root "kill -9 $pid_vivo 2>/dev/null || true" "parar el programa"
         DiFlojo "El programa en si ($destino) NO se borra: eso lo decides tu."
         ;;

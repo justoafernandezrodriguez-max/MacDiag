@@ -396,7 +396,7 @@ for carpeta in /Library/LaunchDaemons /Library/LaunchAgents "$HOME/Library/Launc
         # El destino de verdad: si lanza bash, lo que importa es el script.
         destino="$prog"
         case "${prog##*/}" in bash|sh|zsh) [ -n "$arg" ] && destino="$arg" ;; esac
-        etiq="$(plutil -p "$plist" 2>/dev/null | awk '/"Label"/{sub(/.*=> "/,""); sub(/".*/,""); print; exit}')"
+        etiq="$(etiqueta_de_plist "$plist")"
         printf '%s\t%s\t%s\t%s\n' "$destino" "$plist" "$motivos" "${etiq:-?}" >> "$CRUDO/_SOSPECHOSOS.tsv"
     done
 done
@@ -414,7 +414,16 @@ if [ -s "$CRUDO/_SOSPECHOSOS.tsv" ]; then
         etiqueta="$(awk -F'\t' -v d="$destino" '$1==d { print $4; exit }' "$CRUDO/_SOSPECHOSOS.tsv")"
         N_FICHEROS=$(( N_FICHEROS + cuantos ))
 
-        nombre="$(basename "$destino")"
+        # El nombre que se ensena. Con ruta, el del fichero: "xmrig" dice mucho
+        # mas que la etiqueta que se haya puesto, que para eso se falsifica.
+        # Sin ruta el programa es un mando suelto y su nombre no informa de
+        # nada -un agente de Canon que lanza "rm -rf" salia titulado "rm"-, asi
+        # que ahi vale mas la etiqueta, que al menos dice de quien es.
+        case "$destino" in
+            /*) nombre="$(basename "$destino")" ;;
+            *)  nombre="$destino"
+                [ -n "$etiqueta" ] && [ "$etiqueta" != "?" ] && nombre="$etiqueta" ;;
+        esac
         if [ "$cuantos" -gt 1 ]; then
             titulo="\"$nombre\" arranca solo, y hay $cuantos ficheros puestos para que asi sea"
         else
@@ -427,7 +436,7 @@ if [ -s "$CRUDO/_SOSPECHOSOS.tsv" ]; then
         # Si ademas se esta comiendo la CPU ahora mismo, se dice AQUI y no en un
         # hallazgo aparte: es el mismo problema.
         consumo=""
-        pid_vivo="$(pgrep -f "$destino" 2>/dev/null | head -1)"
+        pid_vivo="$(pid_del_programa "$destino")"
         if [ -n "$pid_vivo" ]; then
             cpu_vivo="$(ps -p "$pid_vivo" -o pcpu= 2>/dev/null | tr -d ' ')"
             consumo=" Ahora mismo esta EN MARCHA y se lleva el ${cpu_vivo:-?} % de la CPU."
