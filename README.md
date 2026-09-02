@@ -1,5 +1,17 @@
 # MacDiag
 
+> ### ¿Empiezas de cero, o eres una sesión nueva de Claude?
+>
+> **Lee primero [`docs/0.0-EMPEZAR-AQUI.md`](docs/0.0-EMPEZAR-AQUI.md).** Lleva
+> el equipo donde se desarrolla, qué hay que instalar (casi nada), el lío de las
+> claves SSH de este Mac, qué está probado y qué no, y las reglas del proyecto
+> que no se discuten.
+>
+> Después, [`docs/1.0-ESTADO.md`](docs/1.0-ESTADO.md), que es el punto de
+> retomada de verdad: el estado, lo que falta por decidir, y las **20 trampas ya
+> pagadas** que conviene no volver a pagar.
+
+
 Una aplicación suelta que dice cómo está un Mac y le hace el mantenimiento
 razonable, dejando un informe y un historial. Para cualquier Mac: el portátil
 de alguien, el de la oficina, el de casa.
