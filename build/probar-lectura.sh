@@ -557,6 +557,68 @@ comprobar "una carpeta sin partes da cero"      "0" "$(fallos_partes_de "$TRABAJ
 comprobar "y un fichero que no existe, tambien" "0" "$(fallos_jetsam_de "$TRABAJO/no-existe-esto.txt")"
 
 # ---------------------------------------------------------------------------
+printf '\n== La actualizacion que lo intenta todas las noches\n'
+# ---------------------------------------------------------------------------
+#
+# Captura literal de un MacBook con Sequoia el 2-sep-2026, recortada. El
+# sistema llevaba desde el 29-ago despertandose cada madrugada a instalar la
+# misma actualizacion sin conseguirlo, y MacDiag solo decia "hay 2
+# actualizaciones pendientes", que es verdad y no sirve de nada.
+
+AJ="$TRABAJO/act_ajustes.txt"
+cat > "$AJ" <<'FIN'
+{
+    AutomaticCheckEnabled = 1;
+    AutomaticDownload = 1;
+    AutomaticallyInstallMacOSUpdates = 1;
+    CriticalUpdateInstall = 1;
+    FirstInstallTonightDateDictionary =     {
+        "MSU_UPDATE_24G325_patch_15.7.2_minor" = "2025-12-01 20:19:07 +0000";
+        "MSU_UPDATE_24G419_patch_15.7.3_minor" = "2026-01-16 10:15:59 +0000";
+        "MSU_UPDATE_24G720_patch_15.7.7_minor" = "2026-06-26 07:08:05 +0000";
+        "MSU_UPDATE_24G830_patch_15.7.9_minor" = "2026-08-29 10:03:39 +0000";
+    };
+    FirstOfferDateDictionary =     {
+        "MSU_UPDATE_24G830_patch_15.7.9_minor" = "2026-08-24 09:55:06 +0000";
+    };
+    LastRecommendedUpdatesAvailable = 1;
+}
+FIN
+comprobar "se ve que las instala solo" "si" "$(act_auto_de "$AJ")"
+
+# LAS CUATRO ENTRADAS SON A PROPOSITO, y la primera version de esta prueba solo
+# tenia una. Ese diccionario acumula una entrada por cada actualizacion que se
+# ha intentado poner de noche DESDE SIEMPRE, y las viejas se quedan ahi aunque
+# se instalaran sin problemas. Con una sola entrada la prueba pasaba y el
+# codigo estaba mal: cogia la mas antigua y contestaba "lleva 274 dias
+# intentandolo" por una actualizacion de diciembre que ya estaba puesta.
+#
+# La leccion es sobre las pruebas, no sobre las fechas: al recortar una captura
+# real para meterla aqui se quito justo lo que rompia el codigo. Si se recorta,
+# hay que dejar lo que hace el caso dificil.
+#
+# Los dias salen de restar a hoy, asi que la prueba no puede fijar un numero:
+# se calcula con la fecha que TIENE que usar -la ultima noche, no la primera, y
+# no la de la primera oferta, que es de otro diccionario-.
+DIAS="$(act_dias_intentando_de "$AJ")"
+ESPERADO=$(( ( $(date +%s) - $(date -j -f "%Y-%m-%d %H:%M:%S %z" "2026-08-29 10:03:39 +0000" +%s 2>/dev/null) ) / 86400 ))
+comprobar "cuenta desde la ULTIMA noche, no desde una actualizacion ya instalada" "$ESPERADO" "$DIAS"
+
+# Apagado es una respuesta, y "no lo pone en el fichero" es otra distinta.
+cat > "$TRABAJO/act_apagado.txt" <<'FIN'
+{
+    AutomaticallyInstallMacOSUpdates = 0;
+}
+FIN
+: > "$TRABAJO/act_mudo.txt"
+comprobar "si esta apagado, se dice que esta apagado"   "no" "$(act_auto_de "$TRABAJO/act_apagado.txt")"
+comprobar "y si no lo dice el fichero, no se inventa"   ""   "$(act_auto_de "$TRABAJO/act_mudo.txt")"
+
+# Y lo importante: no haberlo intentado NUNCA no es llevar cero dias. Si esto
+# devolviera 0 el aviso saltaria en cualquier Mac recien actualizado.
+comprobar "no haberlo intentado nunca no es llevar cero dias" "" "$(act_dias_intentando_de "$TRABAJO/act_mudo.txt")"
+
+# ---------------------------------------------------------------------------
 printf '\n== El detector de arranques sospechosos\n'
 # ---------------------------------------------------------------------------
 #
@@ -731,6 +793,47 @@ else
 fi
 comprobar "y con un solo argumento no se inventa un segundo desde Sockets" \
     "" "$(argumento_de_plist "$FALSOS/canon-resto.plist")"
+
+# ---------------------------------------------------------------------------
+printf '\n== De donde sale un programa que se come la CPU\n'
+# ---------------------------------------------------------------------------
+#
+# "knowledgeconstructiond se lleva el 98 % de la CPU" y punto es contar sin
+# mirar: quien lo lee no sabe si eso es macOS indexando o algo que sobra. La
+# ruta ya lo dice, y gratis: /System va en el volumen sellado.
+#
+# Comprobado con df y mount en los dos Macs de pruebas: /System, /usr/bin,
+# /usr/libexec, /usr/sbin, /sbin y /bin sirven desde "/", que monta sellado y
+# de solo lectura. /Applications, /Library y /usr/local van en el de datos.
+
+procedencia_de "/System/Library/PrivateFrameworks/IntelligencePlatformCore.framework/Versions/A/knowledgeconstructiond"
+comprobar "un programa de /System es del sistema, y se sabe sin ejecutar nada" "sistema" "$PROCEDENCIA_CLASE"
+procedencia_de "/usr/libexec/thermalmonitord"
+comprobar "y uno de /usr/libexec tambien"                                     "sistema" "$PROCEDENCIA_CLASE"
+procedencia_de "/bin/ls"
+comprobar "y uno de /bin"                                                     "sistema" "$PROCEDENCIA_CLASE"
+
+# /usr/local NO es del sistema aunque el nombre lo parezca: va en el volumen de
+# datos, que se escribe. Darlo por sellado seria firmarle un aval a cualquier
+# cosa que alguien deje ahi, y en el MacBook de las pruebas habia justo eso:
+# un demonio de root escuchando en tres puertos desde /usr/local.
+procedencia_de "/usr/local/codex/bin/drserver"
+if [ "$PROCEDENCIA_CLASE" = "sistema" ]; then
+    MAL=$(( MAL + 1 )); printf '  MAL   ha dado /usr/local por sistema, y ese volumen se escribe\n'
+else
+    BIEN=$(( BIEN + 1 )); printf '  ok    pero /usr/local NO es el sistema: ese volumen se escribe\n'
+fi
+
+# Sin ruta no se puede saber, y eso se dice en vez de suponer.
+procedencia_de ""
+comprobar "sin ruta no se inventa una procedencia" "nosesabe" "$PROCEDENCIA_CLASE"
+
+# Un fichero que existe y no lo firma nadie: tiene que salir como tal, no como
+# "no se sabe". Son cosas distintas y el aviso cambia.
+printf '#!/bin/sh\ntrue\n' > "$TRABAJO/programa-pelado"
+chmod +x "$TRABAJO/programa-pelado"
+procedencia_de "$TRABAJO/programa-pelado"
+comprobar "un programa sin firma se dice que no la lleva" "sinfirmar" "$PROCEDENCIA_CLASE"
 
 # ---------------------------------------------------------------------------
 printf '\n== De quien es el proceso que se va a matar\n'

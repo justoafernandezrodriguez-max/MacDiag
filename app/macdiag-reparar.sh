@@ -176,6 +176,21 @@ aplicar() {
         encolar_root "launchctl bootout system/com.apple.screensharing 2>/dev/null || true" "cerrar la sesion de pantalla compartida"
         ;;
 
+    pausar-actualizaciones)
+        # Dejar de INTENTAR instalarlas solo. No se toca ni la comprobacion ni
+        # el aviso: el usuario sigue sabiendo que existen, que es lo que no se
+        # le puede quitar. Esto elige el CUANDO, no el si.
+        #
+        # Se deja fuera a proposito CriticalUpdateInstall, que es lo que mete
+        # las respuestas rapidas de seguridad. Apagar eso si seria quitarle al
+        # equipo una proteccion, y este boton no esta para eso.
+        Paso "Dejar de intentar instalar las actualizaciones cada noche"
+        Di "Se seguira avisando de que hay actualizaciones. Lo que se apaga es"
+        Di "que intente ponerlas el solo de madrugada."
+        encolar_root "defaults write /Library/Preferences/com.apple.SoftwareUpdate AutomaticallyInstallMacOSUpdates -bool false" "dejar de instalar actualizaciones de macOS por su cuenta"
+        DiFlojo "Para volver a encenderlo: Ajustes del Sistema > General > Actualizacion de software > Actualizaciones automaticas."
+        ;;
+
     instalar-actualizaciones)
         # Puede tardar mucho y puede pedir reiniciar. Se instala igualmente y
         # se AVISA de que hay que reiniciar; reiniciar no lo hace MacDiag, lo
@@ -351,7 +366,7 @@ case "${1:-}" in
         fi
         # Lo automatico se aplica. Lo que necesita una persona se ENUMERA pero
         # no se abre: abrir cuatro paneles de Ajustes de golpe no ayuda a nadie.
-        automaticas=""; manuales=""
+        automaticas=""; manuales=""; elegibles=""
         # SEIS campos, no cinco. Esto se pago: al anadir los pasos, el fichero
         # paso a tener un campo mas y aqui se seguian leyendo cinco, asi que la
         # accion se llevaba los pasos pegados detras:
@@ -371,12 +386,23 @@ case "${1:-}" in
             case "$ac" in
                 abrir:*) manuales="$manuales$ac|$ti
 " ;;
+                # Hay acciones que NO son reparar: son elegir. "Reparar todo"
+                # arregla defectos, y pausar las actualizaciones de seguridad
+                # del equipo no es un defecto arreglado, es una decision del
+                # usuario con consecuencias. Que la tome pulsando su boton, no
+                # de rebote al pulsar otro.
+                #
+                # Es el mismo cuidado que hay que tener con apagar-compartir,
+                # que puede dejar fuera a quien este trabajando en remoto.
+                pausar-actualizaciones)
+                    elegibles="$elegibles$ac|$ti
+" ;;
                 *)       automaticas="$automaticas$ac
 " ;;
             esac
         done < "${C}hallazgos.tsv"
 
-        if [ -z "$automaticas" ] && [ -z "$manuales" ]; then
+        if [ -z "$automaticas" ] && [ -z "$manuales" ] && [ -z "$elegibles" ]; then
             Paso "Reparar"
             Di "No hay nada que MacDiag pueda reparar de lo que ha encontrado."
             exit 0
@@ -404,6 +430,19 @@ case "${1:-}" in
             done
             Di ""
             Di "Marcalo en la lista y pulsa 'Reparar lo seleccionado': te llevo al sitio."
+        fi
+
+        # Y lo que se ha dejado sin hacer a proposito se DICE. Callarlo seria
+        # peor que aplicarlo: quien pulsa "Reparar todo" se queda pensando que
+        # ya esta todo hecho.
+        if [ -n "$elegibles" ]; then
+            Paso "Esto no lo decide MacDiag"
+            printf '%s' "$elegibles" | while IFS='|' read -r a t; do
+                [ -n "$t" ] && Di "- $t"
+            done
+            Di ""
+            Di "No se ha tocado: cambia como se comporta el equipo, y eso lo eliges tu."
+            Di "Marcalo en la lista y pulsa 'Reparar lo seleccionado' si lo quieres."
         fi
     else
         for a in "$@"; do aplicar "$a"; done

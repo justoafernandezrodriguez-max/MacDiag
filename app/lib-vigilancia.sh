@@ -252,3 +252,59 @@ procesos_pesados() {
 ruta_de_proceso() {
     ps -p "$1" -o comm= 2>/dev/null | head -1
 }
+
+# Cuanto lleva en marcha. Distingue "lo acabo de abrir" de "lleva tres horas".
+tiempo_de_proceso() {
+    ps -p "$1" -o etime= 2>/dev/null | tr -d ' ' | head -1
+}
+
+# ---------------------------------------------------------------------------
+#  De donde sale un programa
+#
+#  Decir "knowledgeconstructiond se lleva el 98 % de la CPU" y quedarse ahi es
+#  contar sin mirar: quien lo lee no sabe si eso es macOS haciendo su trabajo o
+#  algo que no deberia estar. La aplicacion SI puede saberlo, y sin preguntar a
+#  nadie.
+#
+#  El orden de las preguntas va de la respuesta mas fuerte a la mas debil:
+#
+#  1. Si vive en el volumen del sistema, es de Apple y ademas NO PUEDE estar
+#     manipulado, porque desde Big Sur ese volumen va sellado y verificado.
+#     Comprobado con df y mount en este Mac: /System, /usr/bin, /usr/libexec,
+#     /usr/sbin, /sbin y /bin sirven desde "/", que monta "apfs, sealed,
+#     read-only". /Applications, /Library y /usr/local NO: esos van en el
+#     volumen de datos, que se escribe.
+#     Es la respuesta mas fuerte y la mas barata: sale de la ruta, sin ejecutar
+#     nada.
+#  2. Si no, se mira quien lo firma.
+#  3. Y si no lo firma nadie, eso tambien es una respuesta, y de las que
+#     interesan.
+#
+#  Deja el resultado en dos variables en vez de devolverlo, para no tener que
+#  llamar dos veces a codesign, que es lo unico caro de aqui.
+# ---------------------------------------------------------------------------
+PROCEDENCIA_CLASE=""
+PROCEDENCIA=""
+procedencia_de() {
+    local r="${1:-}" firma
+    PROCEDENCIA_CLASE="nosesabe"
+    PROCEDENCIA="no se ha podido saber de donde sale"
+    [ -n "$r" ] || return 0
+
+    case "$r" in
+        /System/*|/usr/bin/*|/usr/sbin/*|/usr/libexec/*|/sbin/*|/bin/*)
+            PROCEDENCIA_CLASE="sistema"
+            PROCEDENCIA="es del propio macOS: vive en el volumen del sistema, que va sellado y verificado, asi que no puede estar manipulado"
+            return 0 ;;
+    esac
+
+    firma="$(codesign -dv --verbose=2 "$r" 2>&1 | sed -n 's/^Authority=//p' | head -1)"
+    if [ -n "$firma" ]; then
+        PROCEDENCIA_CLASE="firmado"
+        PROCEDENCIA="lo firma $firma"
+    else
+        PROCEDENCIA_CLASE="sinfirmar"
+        PROCEDENCIA="no lleva firma de nadie, o no se ha podido comprobar"
+    fi
+    return 0
+}

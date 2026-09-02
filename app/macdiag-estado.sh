@@ -504,10 +504,27 @@ while IFS=$'\t' read -r pid pcpu pmem cmd; do
                 "parar-proceso:$pid" \
                 "MacDiag para el programa (necesita permiso de administrador) | Comprueba que no vuelve a arrancar solo: si vuelve, es que algo lo relanza y saldra arriba, en lo que arranca solo | Lo que NO hace: borrar el programa. Miralo tu antes en $ruta" ;;
         *)
+            # De donde sale y cuanto lleva. Sin esto el aviso le devuelve la
+            # pregunta al usuario -"mira si es algo que has abierto tu"- cuando
+            # la aplicacion puede contestarla ella.
+            procedencia_de "$ruta"
+            vive="$(tiempo_de_proceso "$pid")"
+            det="De donde viene: $PROCEDENCIA."
+            [ -n "$vive" ] && det="$det Lleva $vive en marcha."
+            [ -n "$ruta" ] && det="$det Esta en $ruta."
+            case "$PROCEDENCIA_CLASE" in
+                sistema)
+                    det="$det Los programas del sistema que se disparan asi casi siempre estan indexando -Spotlight, Fotos, las sugerencias- y paran solos cuando terminan. Molestan mientras dura, sobre todo si el equipo va justo de memoria, pero no son una averia."
+                    pas="No hay que hacer nada: termina solo | Si lleva horas y el equipo va lento, reiniciar corta el indexado y lo reanuda mas tarde | Si se repite todos los dias, mira en Ajustes si puedes apagar lo que lo genera -Spotlight, Siri, Apple Intelligence-" ;;
+                firmado)
+                    det="$det Si es un programa que tienes abierto y esta trabajando -renderizar, comprimir, sincronizar- es normal y se pasa al terminar."
+                    pas="Mira si lo tienes abierto y esta haciendo algo | Si ha terminado y sigue asi, cierralo desde su propia ventana | Si no lo usas, quitalo del arranque o desinstalalo" ;;
+                *)
+                    det="$det Que un programa se lleve la CPU y ademas no se sepa de quien es no lo convierte en malo -hay programas honrados sin firmar- pero es lo primero que hay que aclarar."
+                    pas="Busca el nombre y la ruta en internet antes de tocar nada | Si no reconoces el programa, mira en la seccion de lo que arranca solo por si tambien esta ahi | No lo pares a ciegas: si algo lo relanza, volvera" ;;
+            esac
             hallazgo "AVISO" "PROCESOS" "\"$cmd\" se esta llevando el $pcpu % de la CPU" \
-                "Lleva la CPU muy cargada. Si es algo que has abierto tu -renderizar, comprimir, compilar- es normal y se pasa al terminar." \
-                "" \
-                "Mira si es algo que has abierto tu | Si lo es y ha terminado, cierralo desde su propia ventana | Si no sabes que es, buscalo por el nombre antes de tocar nada" ;;
+                "$det" "" "$pas" ;;
     esac
 done < <(procesos_pesados 70)
 set_dato "procesos.pesados" "$PESADOS"
@@ -641,6 +658,17 @@ elif [ "$(codigo_de actualizaciones)" = "124" ]; then
 else
     no_pude "Las actualizaciones pendientes" "softwareupdate ha terminado con codigo $(codigo_de actualizaciones)"
 fi
+
+# Como esta puesto el automatico, y desde cuando lo intenta.
+#
+# "Hay 2 actualizaciones pendientes" y "lleva nueve noches intentando instalar
+# la misma y no puede" son cosas distintas, y la segunda es la que hay que
+# contar: mientras dura, el equipo reserva sitio en un disco que va justo y
+# reintenta cada madrugada. Lo que lo distingue es la fecha en la que la
+# ofrecio por primera vez comparada con la de hoy.
+capturar "act_ajustes" 20 defaults read /Library/Preferences/com.apple.SoftwareUpdate
+set_dato "act.auto_instala"   "$(act_auto_de "$CRUDO/act_ajustes.txt")"
+set_dato "act.dias_intentando" "$(act_dias_intentando_de "$CRUDO/act_ajustes.txt")"
 
 # ---------------------------------------------------------------------------
 # Que se podria liberar
@@ -837,6 +865,16 @@ fi
 
 AP="$(dato act.pendientes)"
 if es_numero "$AP" && [ "$AP" -gt 0 ]; then
+    # Si lleva noches intentandolo y no puede, ese es el problema de verdad, y
+    # el consejo cambia entero: no es "instalala", es "o le haces sitio, o le
+    # dices que pare, porque ahora mismo lo esta intentando cada madrugada".
+    DIAS_ACT="$(dato act.dias_intentando)"
+    if es_numero "$DIAS_ACT" && [ "$DIAS_ACT" -ge 2 ] && [ "$(dato act.auto_instala)" = "si" ]; then
+        hallazgo "AVISO" "SISTEMA" "Lleva $DIAS_ACT dias intentando instalar una actualizacion cada noche, y no lo consigue" \
+            "El sistema tiene la actualizacion descargada y preparada, y todas las madrugadas se despierta a instalarla y no puede. La causa mas habitual es que no le llega el espacio libre. Mientras esto dure, la copia preparada ocupa sitio en el disco y el equipo hace trabajo de noche para nada. Hay dos salidas honradas: hacerle sitio e instalarla, o decirle que deje de intentarlo hasta que tu quieras. Lo que no arregla nada es dejarlo asi." \
+            "pausar-actualizaciones" \
+            "Si quieres instalarla: libera espacio primero y luego pulsa instalar | Si ahora no te viene bien: pausar deja de intentarlo cada noche, pero SIGUE avisando de que existe | Las de seguridad conviene ponerlas en cuanto puedas: pausar es para elegir cuando, no para no hacerlo | Se vuelve a encender en Ajustes del Sistema > General > Actualizacion de software > Actualizaciones automaticas"
+    fi
     hallazgo "AVISO" "SISTEMA" "Hay $AP actualizacion(es) de Apple sin instalar" \
         "Las de seguridad de macOS no son opcionales en la practica." \
         "instalar-actualizaciones" "Ajustes del Sistema > General > Actualizacion de software | Instalar ahora | Algunas piden reiniciar: guarda lo que tengas abierto antes"

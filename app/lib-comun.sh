@@ -18,7 +18,7 @@
 
 # La version va en UN solo sitio, y este es el sitio. Es la leccion de PCDIAG:
 # el dia que el numero vive en tres ficheros, se actualizan dos.
-VERSION_MACDIAG="0.5.2"
+VERSION_MACDIAG="0.5.3"
 
 # ---------------------------------------------------------------------------
 # Decir cosas por pantalla
@@ -350,6 +350,50 @@ du_vetadas_de() {
 #  UNO. Y ademas metia en el mismo saco los Jetsam, que no son un fallo de un
 #  programa sino el nucleo cerrando programas por falta de memoria.
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+#  Las actualizaciones: no basta con cuantas hay
+#
+#  "Hay 2 actualizaciones pendientes" y "lleva nueve noches intentando instalar
+#  la misma sin conseguirlo" son cosas distintas, y la segunda es la util. En
+#  el MacBook de las pruebas el sistema llevaba desde el 29-ago reintentandolo
+#  cada madrugada: se despierta, no puede -no hay sitio-, y lo vuelve a dejar
+#  preparado, con una instantanea que ademas fija el minimo del contenedor.
+#  Quien lo sufre solo ve que el Mac "hace cosas de noche" y que el disco no
+#  baja.
+# ---------------------------------------------------------------------------
+
+# Si esta puesto que las instale solo: si / no / vacio si no se sabe.
+act_auto_de() {
+    [ -f "$1" ] || { echo ""; return; }
+    grep -qE 'AutomaticallyInstallMacOSUpdates[ ]*=[ ]*1' "$1" 2>/dev/null && { echo "si"; return; }
+    grep -qE 'AutomaticallyInstallMacOSUpdates[ ]*=[ ]*0' "$1" 2>/dev/null && { echo "no"; return; }
+    echo ""
+}
+
+# Cuantos dias lleva intentando instalar la misma actualizacion de noche.
+# Vacio si no lo ha intentado nunca, que NO es lo mismo que llevar cero dias.
+act_dias_intentando_de() {
+    local fecha ts ahora
+    [ -f "$1" ] || { echo ""; return; }
+    # LA ULTIMA, no la primera. Ese diccionario guarda una entrada por CADA
+    # actualizacion que se ha intentado instalar de noche desde que el equipo
+    # existe, y se queda ahi aunque se instalara hace meses. Cogiendo la mas
+    # antigua, el MacBook de las pruebas contesto "lleva 274 dias
+    # intentandolo": la fecha era de una actualizacion de diciembre que se
+    # habia puesto sin problemas. La que esta en curso es la ultima.
+    fecha="$(sed -n '/FirstInstallTonightDateDictionary/,/};/p' "$1" 2>/dev/null \
+             | sed -n 's/.*= "\([0-9][0-9-]* [0-9][0-9:]* [+-][0-9]*\)".*/\1/p' \
+             | sort | tail -1)"
+    [ -n "$fecha" ] || { echo ""; return; }
+    # date de BSD, que es el que trae macOS: -j para no tocar el reloj y -f
+    # para decirle como viene escrita la fecha.
+    ts="$(date -j -f "%Y-%m-%d %H:%M:%S %z" "$fecha" +%s 2>/dev/null)"
+    es_numero "$ts" || { echo ""; return; }
+    ahora="$(date +%s)"
+    [ "$ahora" -ge "$ts" ] || { echo ""; return; }
+    echo $(( (ahora - ts) / 86400 ))
+}
 
 # Reinicios del sistema entero.
 fallos_panic_de() {
