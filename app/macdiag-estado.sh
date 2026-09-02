@@ -302,7 +302,7 @@ DIR_USU="$HOME/Library/Logs/DiagnosticReports"
 if [ "$A_FONDO" = "si" ]; then
     # Con permiso se lee de verdad. Se pide aqui y solo para esto.
     DiFlojo "pidiendo permiso para leer los partes de fallo del sistema"
-    if osascript -e "do shell script \"ls -1 '$DIR_SIS' > '$CRUDO/fallos_sistema_ls.txt' 2>&1; find '$DIR_SIS' -maxdepth 1 -type f -mtime -30 > '$CRUDO/fallos_sistema_30d.txt' 2>&1; chown $(id -u) '$CRUDO/fallos_sistema_ls.txt' '$CRUDO/fallos_sistema_30d.txt'\" with prompt \"MacDiag necesita permiso para leer los partes de fallo del sistema, que dicen por que se ha reiniciado solo el equipo\" with administrator privileges" >/dev/null 2>&1; then
+    if osascript -e "do shell script \"ls -1 '$DIR_SIS' > '$CRUDO/fallos_sistema_ls.txt' 2>&1; find '$DIR_SIS' -maxdepth 2 -type f -mtime -30 > '$CRUDO/fallos_sistema_30d.txt' 2>&1; chown $(id -u) '$CRUDO/fallos_sistema_ls.txt' '$CRUDO/fallos_sistema_30d.txt'\" with prompt \"MacDiag necesita permiso para leer los partes de fallo del sistema, que dicen por que se ha reiniciado solo el equipo\" with administrator privileges" >/dev/null 2>&1; then
         printf 'fallos_sistema_ls\t0\t0\tls (con permiso)\n'  >> "$CRUDO/_MANDOS.tsv"
         printf 'fallos_sistema_30d\t0\t0\tfind (con permiso)\n' >> "$CRUDO/_MANDOS.tsv"
         DiOk "leidos con permiso de administrador"
@@ -314,7 +314,7 @@ if [ "$A_FONDO" = "si" ]; then
     fi
 else
     capturar "fallos_sistema_ls"   20 ls -1 "$DIR_SIS"
-    capturar "fallos_sistema_30d"  30 find "$DIR_SIS" -maxdepth 1 -type f -mtime -30
+    capturar "fallos_sistema_30d"  30 find "$DIR_SIS" -maxdepth 2 -type f -mtime -30
 fi
 capturar "fallos_usuario_ls"   20 ls -1 "$DIR_USU"
 capturar "fallos_usuario_30d"  30 find "$DIR_USU" -maxdepth 1 -type f -mtime -30
@@ -327,20 +327,44 @@ if grep -qiE 'Operation not permitted|Permission denied' "$CRUDO/fallos_sistema_
 fi
 set_dato "fallos.puedo_leer" "$PUEDO_LEER_FALLOS"
 
+# Las extensiones, que aqui se dieron por sabidas y estaban mal. La trampa 8
+# decia "los partes son .ips desde Monterey y .crash antes", escrito sin un Mac
+# delante. En Sequoia la mayoria son .diag: en un MacBook de verdad habia 31
+# partes en treinta dias -29 .diag, 1 .panic, 1 .ips- y MacDiag contaba UNO,
+# porque filtraba por (ips|crash). Un numero tranquilizador y falso, que es la
+# forma en que este proyecto ya se ha equivocado dos veces.
+#
+# Y se contaba todo junto, que es el otro error: un parte de que se ha cerrado
+# una aplicacion y un Jetsam no son lo mismo. Un Jetsam es el nucleo MATANDO
+# programas porque se ha quedado sin memoria, y eso explica un "va lento" que
+# el usuario no sabe nombrar. En ese MacBook hubo cinco en treinta dias.
+N_JETSAM=0
 if [ "$PUEDO_LEER_FALLOS" = "si" ]; then
-    # -E y no la alternancia "\|", que es de grep de GNU: el de macOS viene de
-    # BSD y ahi no esta garantizada.
-    N_PANIC=$(grep -cE '\.panic$' "$CRUDO/fallos_sistema_30d.txt" 2>/dev/null || true)
-    N_IPS=$(grep -cE '\.(ips|crash)$' "$CRUDO/fallos_sistema_30d.txt" 2>/dev/null || true)
-    es_numero "$N_PANIC" || N_PANIC=0
-    es_numero "$N_IPS" || N_IPS=0
-    set_dato "fallos.panics_30d" "$N_PANIC"
+    N_PANIC="$(fallos_panic_de  "$CRUDO/fallos_sistema_30d.txt")"
+    N_JETSAM="$(fallos_jetsam_de "$CRUDO/fallos_sistema_30d.txt")"
+    N_IPS="$(fallos_partes_de   "$CRUDO/fallos_sistema_30d.txt")"
+    set_dato "fallos.panics_30d"   "$N_PANIC"
+    set_dato "fallos.jetsam_30d"   "$N_JETSAM"
     set_dato "fallos.informes_30d" "$N_IPS"
 fi
 
-N_IPS_USU=$(grep -cE '\.(ips|crash)$' "$CRUDO/fallos_usuario_30d.txt" 2>/dev/null || true)
-es_numero "$N_IPS_USU" || N_IPS_USU=0
+N_IPS_USU="$(fallos_partes_de "$CRUDO/fallos_usuario_30d.txt")"
 set_dato "fallos.usuario_30d" "$N_IPS_USU"
+
+# Y a los Jetsam se les mira dentro, que para eso estan. "Cinco veces" no dice
+# nada; "cinco veces, y las que mas ocupaban eran Photoshop y Chrome" dice al
+# usuario exactamente que tiene que dejar de abrir a la vez.
+: > "$CRUDO/jetsam_procesos.txt"
+N_JETSAM_LEIDOS=0
+if [ "$N_JETSAM" -gt 0 ]; then
+    while IFS= read -r j; do
+        [ -r "$j" ] || continue
+        quien="$(grep -o '"largestProcess" : "[^"]*"' "$j" 2>/dev/null | head -1 | sed 's/.*: "//; s/"$//')"
+        [ -n "$quien" ] || continue
+        printf '%s\n' "$quien" >> "$CRUDO/jetsam_procesos.txt"
+        N_JETSAM_LEIDOS=$(( N_JETSAM_LEIDOS + 1 ))
+    done < <(grep -E '/JetsamEvent[^/]*$' "$CRUDO/fallos_sistema_30d.txt" 2>/dev/null)
+fi
 
 # ---------------------------------------------------------------------------
 # Que se abre solo al arrancar
@@ -779,6 +803,35 @@ if [ "$(dato fallos.puedo_leer)" = "si" ]; then
     if es_numero "$NP" && [ "$NP" -gt 0 ]; then
         hallazgo "CRITICO" "FALLOS" "$NP reinicio(s) por fallo del sistema en los ultimos 30 dias" \
             "Un kernel panic es el equivalente del pantallazo azul: el sistema se para y reinicia solo. Los partes estan en $DIR_SIS. Si se repiten, casi nunca es una aplicacion: suele ser memoria, disco o algo conectado."
+    fi
+
+    # Los Jetsam. Van aparte de los panicos y de los partes normales porque no
+    # son un fallo de un programa: son el nucleo cerrando programas para poder
+    # seguir. El usuario lo vive como "se me ha cerrado solo" y no lo relaciona
+    # con la memoria.
+    NJ="$(dato fallos.jetsam_30d)"
+    if es_numero "$NJ" && [ "$NJ" -gt 0 ]; then
+        # Los nombres, que es lo que convierte el numero en algo accionable.
+        QUIENES=""
+        if [ -s "$CRUDO/jetsam_procesos.txt" ]; then
+            QUIENES="$(sort "$CRUDO/jetsam_procesos.txt" | uniq -c | sort -rn | head -3 \
+                       | awk '{ n=$1; $1=""; sub(/^ +/,""); printf "%s%s (%s vez/veces)", (NR>1 ? ", " : ""), $0, n }')"
+        fi
+        if [ -n "$QUIENES" ]; then
+            DETALLE_J="Cuando la memoria se agota, macOS cierra programas por su cuenta para poder seguir funcionando: no avisa, la aplicacion simplemente desaparece. Lo que mas ocupaba cuando paso: $QUIENES."
+        else
+            # Se sabe cuantos pero no cuales: se dice, no se calla.
+            DETALLE_J="Cuando la memoria se agota, macOS cierra programas por su cuenta para poder seguir funcionando: no avisa, la aplicacion simplemente desaparece. No se ha podido leer por dentro cual era el programa mas grande en cada caso."
+            no_pude "Que programa se estaba cerrando en cada aviso de falta de memoria" \
+                "los partes estan en $DIR_SIS pero no se han podido abrir para leerlos por dentro"
+        fi
+        DETALLE_J="$DETALLE_J Esto no se arregla borrando ficheros: o se abren menos cosas a la vez, o al equipo le falta memoria, y en los portatiles de los ultimos anos va soldada y no se puede ampliar."
+        PASOS_J="Mira si las que salen ahi son las que tienes abiertas a la vez | Cerrar pestanas del navegador es lo que mas memoria devuelve | En Monitor de Actividad, pestana Memoria, la Presion de memoria en rojo confirma que se queda corto | Si esto pasa a diario, el equipo necesita mas memoria de la que tiene"
+        if [ "$NJ" -ge 3 ]; then
+            hallazgo "AVISO" "MEMORIA" "El sistema ha cerrado programas $NJ veces por falta de memoria" "$DETALLE_J" "" "$PASOS_J"
+        else
+            hallazgo "INFO" "MEMORIA" "El sistema ha cerrado programas $NJ vez/veces por falta de memoria" "$DETALLE_J" "" "$PASOS_J"
+        fi
     fi
 fi
 

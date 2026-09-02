@@ -193,6 +193,7 @@ CAJA
         if [ "$(dato fallos.puedo_leer)" = "si" ]; then
             printf '<table>\n'
             fila_html "Reinicios por fallo del sistema (30 dias)" "fallos.panics_30d"
+            fila_html "Programas cerrados por falta de memoria (30 dias)" "fallos.jetsam_30d"
             fila_html "Partes de fallo del sistema (30 dias)"     "fallos.informes_30d"
             fila_html "Partes de fallo de tus aplicaciones (30 dias)" "fallos.usuario_30d"
             printf '</table>\n'

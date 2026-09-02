@@ -18,7 +18,7 @@
 
 # La version va en UN solo sitio, y este es el sitio. Es la leccion de PCDIAG:
 # el dia que el numero vive en tres ficheros, se actualizan dos.
-VERSION_MACDIAG="0.5.1"
+VERSION_MACDIAG="0.5.2"
 
 # ---------------------------------------------------------------------------
 # Decir cosas por pantalla
@@ -332,6 +332,50 @@ du_vetadas_de() {
     local n
     [ -f "$1" ] || { echo 0; return; }
     n=$(grep -cE 'Operation not permitted|Permission denied' "$1" 2>/dev/null || true)
+    es_numero "$n" || n=0
+    echo "$n"
+}
+
+# ---------------------------------------------------------------------------
+#  Contar los partes de fallo, separados por lo que son
+#
+#  Estan aqui, y no dentro del motor, para poder probarlos con una lista
+#  guardada: es lo mismo que se hizo con tm_estado_de y du_kb_de despues del
+#  primer Mac, y por lo mismo.
+#
+#  Lo que se pago para escribirlas: el motor filtraba por (ips|crash), porque
+#  el documento del proyecto daba por sabido que "los partes son .ips desde
+#  Monterey y .crash antes". En Sequoia la mayoria son .diag. En un MacBook
+#  con 31 partes en treinta dias -29 .diag, 1 .panic, 1 .ips- el informe decia
+#  UNO. Y ademas metia en el mismo saco los Jetsam, que no son un fallo de un
+#  programa sino el nucleo cerrando programas por falta de memoria.
+# ---------------------------------------------------------------------------
+
+# Reinicios del sistema entero.
+fallos_panic_de() {
+    local n
+    [ -f "$1" ] || { echo 0; return; }
+    n=$(grep -cE '\.panic$' "$1" 2>/dev/null || true)
+    es_numero "$n" || n=0
+    echo "$n"
+}
+
+# Veces que el sistema ha cerrado programas por quedarse sin memoria.
+fallos_jetsam_de() {
+    local n
+    [ -f "$1" ] || { echo 0; return; }
+    n=$(grep -cE '/JetsamEvent[^/]*$' "$1" 2>/dev/null || true)
+    es_numero "$n" || n=0
+    echo "$n"
+}
+
+# Los partes normales: todo lo que es un parte, menos los Jetsam, que se
+# cuentan aparte para no sumar dos cosas distintas (trampa 16).
+fallos_partes_de() {
+    local n
+    [ -f "$1" ] || { echo 0; return; }
+    n=$(grep -E '\.(ips|crash|diag)$' "$1" 2>/dev/null \
+        | grep -cvE '/JetsamEvent[^/]*$' 2>/dev/null || true)
     es_numero "$n" || n=0
     echo "$n"
 }

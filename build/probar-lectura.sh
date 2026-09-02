@@ -514,6 +514,49 @@ escribir_html "$TRABAJO/solo-mant.html"
 contiene "solo mantenimiento deja limpio el diagnostico" "$TRABAJO/solo-mant.html" "todas las comprobaciones del equipo se han podido hacer"
 
 # ---------------------------------------------------------------------------
+printf '\n== Contar los partes de fallo, que estaba mal\n'
+# ---------------------------------------------------------------------------
+#
+# Esta lista NO esta imitada: es la salida literal del find en un MacBook Pro
+# con Sequoia 15.7.7, el 2-sep-2026, recortada. Hay 31 partes en treinta dias y
+# MacDiag decia UNO, porque filtraba por (ips|crash) y en Sequoia casi todos
+# son .diag. Un numero tranquilizador y falso.
+#
+# Y los cuatro Jetsam de "Retired" no llegaban ni a la lista, porque el find
+# iba con -maxdepth 1 y esa carpeta esta un nivel mas abajo.
+
+LISTA="$TRABAJO/fallos_reales.txt"
+cat > "$LISTA" <<'FIN'
+/Library/Logs/DiagnosticReports/.contents.panic
+/Library/Logs/DiagnosticReports/JetsamEvent-2026-09-02-105445.ips
+/Library/Logs/DiagnosticReports/Sleep Wake Failure_2026-09-01-105240_MacBook-Pro-de-Ines.diag
+/Library/Logs/DiagnosticReports/knowledgeconstructiond_2026-09-02-113538_MacBook-Pro-de-Ines.cpu_resource.diag
+/Library/Logs/DiagnosticReports/apfsd_2026-08-29-130316_MacBook-Pro-de-Ines.cpu_resource.diag
+/Library/Logs/DiagnosticReports/disk writes_2026-09-02-100106_MacBook-Pro-de-Ines.diag
+/Library/Logs/DiagnosticReports/Google Chrome_2026-08-31-123717_MacBook-Pro-de-Ines.diag
+/Library/Logs/DiagnosticReports/Claude_2026-08-28-133923_MacBook-Pro-de-Ines.diag
+/Library/Logs/DiagnosticReports/Retired/JetsamEvent-2026-09-01-110557.ips
+/Library/Logs/DiagnosticReports/Retired/JetsamEvent-2026-08-31-115113.ips
+/Library/Logs/DiagnosticReports/Retired/JetsamEvent-2026-08-29-130212.ips
+/Library/Logs/DiagnosticReports/Retired/JetsamEvent-2026-08-27-203430.ips
+FIN
+
+comprobar "los reinicios del sistema se cuentan aparte"  "1"  "$(fallos_panic_de "$LISTA")"
+comprobar "los Jetsam se cuentan, y los de Retired tambien" "5" "$(fallos_jetsam_de "$LISTA")"
+comprobar "un .diag es un parte de fallo, no un fichero cualquiera" "6" "$(fallos_partes_de "$LISTA")"
+
+# El reparto tiene que ser limpio: si un Jetsam se contara tambien como parte
+# normal, el usuario veria el mismo problema dos veces con dos nombres.
+TOTAL=$(( $(fallos_panic_de "$LISTA") + $(fallos_jetsam_de "$LISTA") + $(fallos_partes_de "$LISTA") ))
+comprobar "y cada parte se cuenta UNA vez, en un solo saco" "12" "$TOTAL"
+
+# Una lista vacia no es un fallo, y un fichero que no esta tampoco: los dos
+# tienen que dar cero sin reventar. Es la prueba del caso que siempre se olvida.
+: > "$TRABAJO/fallos_vacio.txt"
+comprobar "una carpeta sin partes da cero"      "0" "$(fallos_partes_de "$TRABAJO/fallos_vacio.txt")"
+comprobar "y un fichero que no existe, tambien" "0" "$(fallos_jetsam_de "$TRABAJO/no-existe-esto.txt")"
+
+# ---------------------------------------------------------------------------
 printf '\n== El detector de arranques sospechosos\n'
 # ---------------------------------------------------------------------------
 #
