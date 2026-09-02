@@ -557,6 +557,102 @@ comprobar "una carpeta sin partes da cero"      "0" "$(fallos_partes_de "$TRABAJ
 comprobar "y un fichero que no existe, tambien" "0" "$(fallos_jetsam_de "$TRABAJO/no-existe-esto.txt")"
 
 # ---------------------------------------------------------------------------
+printf '\n== Explorar que ocupa cada cosa\n'
+# ---------------------------------------------------------------------------
+#
+# La ventana descodifica esta salida en una estructura FIJA. Si a un JSON le
+# falta un campo no falla ese campo: falla el JSON entero y el explorador se
+# queda en blanco sin decir por que -la trampa 2, el fallo que no da error-.
+# Se escribio asi la primera version: la rama de "esa carpeta no existe"
+# devolvia tres campos de los siete. Compilaba, y habria fallado en cuanto
+# alguien desplegara una carpeta que acabara de borrar.
+#
+# Por eso lo que se comprueba aqui es el CONTRATO: que estan los siete campos
+# siempre, pase lo que pase.
+
+ESPACIO="$RAIZ/app/macdiag-espacio.sh"
+CAMPOS='"ruta" "estado" "vetadas" "total_kb" "entradas" "cuantas" "recortada"'
+
+comprueba_contrato() {   # descripcion  salida
+    local falta=""
+    for c in ruta estado vetadas total_kb entradas cuantas recortada; do
+        printf '%s' "$2" | grep -q "\"$c\":" || falta="$falta $c"
+    done
+    if [ -z "$falta" ]; then
+        BIEN=$(( BIEN + 1 )); printf '  ok    %s\n' "$1"
+    else
+        MAL=$(( MAL + 1 )); printf '  MAL   %s\n        faltan:%s\n' "$1" "$falta"
+    fi
+}
+
+# Una carpeta de verdad, con cosas dentro.
+mkdir -p "$TRABAJO/arbol/hija"
+printf 'x%.0s' $(seq 1 3000) > "$TRABAJO/arbol/fichero.txt"
+SAL_OK="$(bash "$ESPACIO" --ver "$TRABAJO/arbol" 2>/dev/null)"
+comprueba_contrato "una carpeta normal trae los siete campos" "$SAL_OK"
+printf '%s' "$SAL_OK" | grep -q '"nombre": "fichero.txt"' \
+    && { BIEN=$(( BIEN + 1 )); printf '  ok    y los ficheros sueltos salen, no solo las carpetas\n'; } \
+    || { MAL=$(( MAL + 1 )); printf '  MAL   no salen los ficheros sueltos (du de BSD no admite -a con -d)\n'; }
+printf '%s' "$SAL_OK" | grep -q '"nombre": "hija"' \
+    && { BIEN=$(( BIEN + 1 )); printf '  ok    y las carpetas tambien\n'; } \
+    || { MAL=$(( MAL + 1 )); printf '  MAL   no salen las carpetas\n'; }
+
+# Y el caso que se escribio mal: una carpeta que no esta.
+SAL_NO="$(bash "$ESPACIO" --ver "$TRABAJO/esto-no-existe-de-verdad" 2>/dev/null)"
+comprueba_contrato "y una que no existe TAMBIEN los trae" "$SAL_NO"
+printf '%s' "$SAL_NO" | grep -q '"estado": "no-existe"' \
+    && { BIEN=$(( BIEN + 1 )); printf '  ok    diciendo que no existe, que no es lo mismo que estar vacia\n'; } \
+    || { MAL=$(( MAL + 1 )); printf '  MAL   no distingue "no existe" de "vacia"\n'; }
+
+# Una carpeta vacia de verdad: cero entradas, pero JSON entero y valido.
+mkdir -p "$TRABAJO/arbol-vacio"
+SAL_VACIA="$(bash "$ESPACIO" --ver "$TRABAJO/arbol-vacio" 2>/dev/null)"
+comprueba_contrato "y una vacia" "$SAL_VACIA"
+
+# Y que los tres sean JSON valido de verdad, con el validador que ya se examina
+# a si mismo (trampa 11): un JSON a medias es exactamente lo que deja la
+# ventana en blanco.
+if [ -n "$validador_json" ]; then
+    for par in "normal:$SAL_OK" "inexistente:$SAL_NO" "vacia:$SAL_VACIA"; do
+        nom="${par%%:*}"; cuerpo="${par#*:}"
+        printf '%s' "$cuerpo" > "$TRABAJO/nivel.json"
+        if _prueba "$TRABAJO/nivel.json"; then
+            BIEN=$(( BIEN + 1 )); printf '  ok    el JSON de la carpeta %s es valido\n' "$nom"
+        else
+            MAL=$(( MAL + 1 )); printf '  MAL   el JSON de la carpeta %s NO es valido\n' "$nom"
+        fi
+    done
+else
+    printf '  --    sin validador de JSON en este Mac: no se ha comprobado\n'
+fi
+
+# Y lo de verdad importante: que los campos que ESPERA la ventana sean los que
+# ESCRIBE el script. Los dos ficheros se tocan por separado y nadie avisa
+# cuando dejan de casar; lo unico que pasa es que el explorador se queda en
+# blanco. Aqui se leen los campos del Swift DE VERDAD -no una copia pegada en
+# la prueba, que es la trampa de probar otra cosa- y se buscan en la salida.
+SWIFT="$RAIZ/ventana/Fuentes/VistaExplorador.swift"
+if [ -f "$SWIFT" ]; then
+    faltan=""
+    for est in NivelEspacio EntradaEspacio; do
+        for campo in $(awk -v e="struct $est" '
+                $0 ~ e {dentro=1; next}
+                dentro && /^\}/ {exit}
+                dentro && /^ *let / { gsub(/:.*/,""); gsub(/^ *let /,""); print }
+            ' "$SWIFT"); do
+            printf '%s' "$SAL_OK" | grep -q "\"$campo\":" || faltan="$faltan $est.$campo"
+        done
+    done
+    if [ -z "$faltan" ]; then
+        BIEN=$(( BIEN + 1 )); printf '  ok    los campos que espera la ventana son los que escribe el script\n'
+    else
+        MAL=$(( MAL + 1 )); printf '  MAL   la ventana espera campos que el script no escribe:%s\n' "$faltan"
+    fi
+else
+    MAL=$(( MAL + 1 )); printf '  MAL   no esta VistaExplorador.swift\n'
+fi
+
+# ---------------------------------------------------------------------------
 printf '\n== La actualizacion que lo intenta todas las noches\n'
 # ---------------------------------------------------------------------------
 #

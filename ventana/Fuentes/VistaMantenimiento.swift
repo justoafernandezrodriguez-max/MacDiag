@@ -45,6 +45,7 @@ struct VistaMantenimiento: View {
     @State private var marcadas: Set<String> = []
     @State private var confirmarBorrado = false
     @State private var confirmarPapelera = false
+    @State private var explorando: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -94,8 +95,26 @@ struct VistaMantenimiento: View {
                             .foregroundColor((Int(d.pct) ?? 0) >= 90 ? colorGravedad("CRITICO")
                                              : (Int(d.pct) ?? 0) >= 75 ? colorGravedad("AVISO") : .primary)
                     }
+                    TableColumn("") { d in
+                        Button("Explorar") { explorando = (explorando == d.punto) ? nil : d.punto }
+                            .buttonStyle(.link)
+                    }
                 }
                 .frame(height: 132)
+
+                // --- Explorar por dentro ------------------------------------
+                if let raiz = explorando {
+                    HStack {
+                        Text("Que ocupa cada cosa en \(raiz)")
+                            .font(.callout).foregroundColor(.secondary)
+                        Spacer()
+                        Button("Cerrar") { explorando = nil }.buttonStyle(.link)
+                    }
+                    Text("Se despliega carpeta a carpeta y cada una se mide al abrirla. Para borrar algo, la flecha lo abre en el Finder: desde aqui no se borra.")
+                        .font(.callout).foregroundColor(.secondary)
+                    VistaExplorador(raiz: raiz)
+                        .frame(minHeight: 220)
+                }
 
                 // --- Las sugerencias ----------------------------------------
                 HStack {

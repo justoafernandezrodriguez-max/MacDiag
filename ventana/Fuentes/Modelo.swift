@@ -169,6 +169,25 @@ enum Motor {
         catch { DispatchQueue.main.async { final(-1) } }
     }
 
+    /// Ejecuta un script que contesta con un JSON por la salida, y lo
+    /// descodifica. Es para las preguntas cortas -"que hay dentro de esta
+    /// carpeta"- que no llevan barra de progreso ni escriben ningun fichero.
+    static func preguntar<T: Decodable>(_ script: String,
+                                        _ argumentos: [String],
+                                        _ tipo: T.Type,
+                                        listo: @escaping (T?) -> Void) {
+        var salida = ""
+        lanzar(script: script, argumentos: argumentos,
+               linea: { salida += $0 + "\n" },
+               final: { _ in
+                   guard let d = salida.data(using: .utf8),
+                         let v = try? JSONDecoder().decode(T.self, from: d) else {
+                       listo(nil); return
+                   }
+                   listo(v)
+               })
+    }
+
     /// La carpeta del informe mas reciente.
     static func ultimoInforme() -> URL? {
         let fm = FileManager.default

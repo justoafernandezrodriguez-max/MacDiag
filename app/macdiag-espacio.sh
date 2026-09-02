@@ -197,6 +197,115 @@ if [ "${1:-}" = "--borrar-ruta" ]; then
 fi
 
 # ---------------------------------------------------------------------------
+#  Mirar QUE hay dentro de una carpeta, un nivel cada vez
+#
+#      bash macdiag-espacio.sh --ver "/ruta/de/la/carpeta"
+#
+#  Escribe en la salida un JSON con lo que hay colgando de esa carpeta y lo que
+#  ocupa cada cosa, de mayor a menor. La ventana lo llama cada vez que alguien
+#  despliega una carpeta.
+#
+#  POR QUE UN NIVEL CADA VEZ, y no el arbol entero de golpe: medir un disco
+#  completo es recorrerlo entero. En el MacBook de las pruebas, con 187 GB
+#  ocupados, eso son varios minutos con el ventilador a tope, y para cuando
+#  termina el usuario ya ha cerrado la ventana. Midiendo solo lo que se abre,
+#  cada paso tarda lo que tarda ESA carpeta y nada mas.
+#
+#  Tres cosas que se pagaron ya en este proyecto y que aqui vuelven a aplicar:
+#
+#  1. "du" imprime un total AUNQUE le falten trozos (trampa 15). Las carpetas
+#     de privacidad contestan "Operation not permitted" y du sigue sumando lo
+#     demas. Por eso cada linea lleva su estado: medido entero, medido en parte
+#     o no se ha podido. Un numero al que le falta algo no se ensena como si
+#     estuviera completo.
+#  2. macOS no trae "timeout" (trampa 12), asi que se usa con_limite. Y si se
+#     acaba el tiempo se DICE, en vez de ensenar lo que hubiera dado tiempo a
+#     sumar, que seria un numero corto con cara de bueno.
+#  3. Aqui NO se borra nada, ni se ofrece. El explorador es para mirar; lo que
+#     se quiera tirar se abre en el Finder y lo hace la persona. Mandar a la
+#     papelera cualquier ruta que se pueda desplegar -incluido /System- es un
+#     poder que esta aplicacion no necesita tener.
+# ---------------------------------------------------------------------------
+if [ "${1:-}" = "--ver" ]; then
+    RUTA="${2:-}"
+    if [ -z "$RUTA" ] || [ ! -d "$RUTA" ]; then
+        # Con TODOS los campos aunque no haya nada que contar. La ventana lo
+        # descodifica en una estructura fija: si falta uno, no falla ese campo,
+        # falla el JSON entero y el explorador se queda en blanco sin decir por
+        # que. Es la trampa 2 -el fallo que no da error- esperando su turno.
+        printf '{ "ruta": "%s", "estado": "no-existe", "vetadas": 0, "total_kb": 0, "entradas": [], "cuantas": 0, "recortada": false }\n' \
+            "$(esc_json "$RUTA")"
+        exit 0
+    fi
+
+    SALIDA="$(mktemp)"
+    # DOS pasadas, y no una con "du -a -d 1", que es lo que uno escribe primero.
+    # El du de macOS es el de BSD y su sintaxis dice  [-a | -s | -d depth]:
+    # -a y -d SE EXCLUYEN. En Linux conviven y por eso se cuela. Aqui no da un
+    # numero raro, da el "usage" entero y una lista vacia. Trampa 12 otra vez:
+    # lo que macOS no trae -o no trae igual- que en Linux si.
+    #
+    #   1) las carpetas de este nivel, con lo que ocupan enteras
+    #   2) los ficheros sueltos de este nivel, que es donde esta el .dmg de
+    #      5 GB que uno viene buscando
+    #
+    # -x en las dos para no cruzar a otro disco: sin eso, mirar en "/" se mete
+    # en el volumen de datos y cuenta las cosas dos veces.
+    con_limite 60 du -xkd 1 "$RUTA" > "$SALIDA" 2>&1
+    CODIGO=$?
+    if [ "$CODIGO" != "124" ]; then
+        con_limite 30 find "$RUTA" -maxdepth 1 -type f -exec du -k {} + >> "$SALIDA" 2>&1
+    fi
+
+    VETADAS="$(grep -cE 'Operation not permitted|Permission denied' "$SALIDA" 2>/dev/null || true)"
+    es_numero "$VETADAS" || VETADAS=0
+
+    if [ "$CODIGO" = "124" ]; then
+        ESTADO="sin-tiempo"
+    elif [ "$VETADAS" -gt 0 ]; then
+        ESTADO="parcial"
+    else
+        ESTADO="medido"
+    fi
+
+    # La propia carpeta sale en la ultima linea de du: se aparta como total y
+    # no se lista como si fuera hija de si misma.
+    TOTAL_KB="$(awk -F'\t' -v r="$RUTA" '$2 == r { print $1 }' "$SALIDA" | tail -1)"
+    es_numero "$TOTAL_KB" || TOTAL_KB=0
+
+    printf '{\n'
+    printf '  "ruta": "%s",\n'    "$(esc_json "$RUTA")"
+    printf '  "estado": "%s",\n'  "$ESTADO"
+    printf '  "vetadas": %s,\n'   "$VETADAS"
+    printf '  "total_kb": %s,\n'  "$TOTAL_KB"
+    printf '  "entradas": ['
+
+    # Se cortan a 300. Una carpeta con diez mil ficheros sueltos no se lee de
+    # un vistazo, que es justo para lo que sirve esto, y la ventana se atasca.
+    # Si se corta se dice: "recortada" no es lo mismo que "esto es todo".
+    CUANTAS=0
+    PRIMERA="si"
+    while IFS="$(printf '\t')" read -r kb ruta_h; do
+        [ -n "$ruta_h" ] || continue
+        [ "$ruta_h" = "$RUTA" ] && continue
+        es_numero "$kb" || continue
+        CUANTAS=$(( CUANTAS + 1 ))
+        [ "$CUANTAS" -gt 300 ] && continue
+        if [ -d "$ruta_h" ]; then carpeta="true"; else carpeta="false"; fi
+        [ "$PRIMERA" = "si" ] && PRIMERA="no" || printf ','
+        printf '\n    { "nombre": "%s", "ruta": "%s", "kb": %s, "carpeta": %s }' \
+            "$(esc_json "$(basename "$ruta_h")")" "$(esc_json "$ruta_h")" "$kb" "$carpeta"
+    done < <(grep -vE 'Operation not permitted|Permission denied|^du:' "$SALIDA" | sort -rn)
+
+    printf '\n  ],\n'
+    printf '  "cuantas": %s,\n' "$CUANTAS"
+    if [ "$CUANTAS" -gt 300 ]; then printf '  "recortada": true\n'; else printf '  "recortada": false\n'; fi
+    printf '}\n'
+    rm -f "$SALIDA"
+    exit 0
+fi
+
+# ---------------------------------------------------------------------------
 #  Vaciar la papelera. Esto SI es definitivo, y por eso va aparte.
 # ---------------------------------------------------------------------------
 if [ "${1:-}" = "--vaciar-papelera" ]; then

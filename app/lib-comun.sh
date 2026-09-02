@@ -18,7 +18,7 @@
 
 # La version va en UN solo sitio, y este es el sitio. Es la leccion de PCDIAG:
 # el dia que el numero vive en tres ficheros, se actualizan dos.
-VERSION_MACDIAG="0.5.3"
+VERSION_MACDIAG="0.6.0"
 
 # ---------------------------------------------------------------------------
 # Decir cosas por pantalla
