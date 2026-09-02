@@ -45,7 +45,7 @@ struct VistaMantenimiento: View {
     @State private var marcadas: Set<String> = []
     @State private var confirmarBorrado = false
     @State private var confirmarPapelera = false
-    @State private var explorando: String?
+    @State private var seccion = 1
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -76,62 +76,39 @@ struct VistaMantenimiento: View {
             .disabled(app.trabajando)
 
             if let m = mapa {
-                // --- Los discos ---------------------------------------------
-                Text("Los discos").font(.callout).foregroundColor(.secondary)
-                Table(m.discos) {
-                    TableColumn("Disco") { d in
-                        HStack(spacing: 5) {
-                            Image(systemName: d.tipo == "externo" ? "externaldrive" : "internaldrive")
-                                .foregroundColor(.secondary)
-                            Text(d.nombre)
-                        }
-                    }
-                    TableColumn("Punto de montaje", value: \.punto)
-                    TableColumn("Capacidad") { d in Text("\(d.total_gb) GB") }
-                    TableColumn("Ocupado") { d in Text("\(d.usado_gb) GB") }
-                    TableColumn("Libre") { d in Text("\(d.libre_gb) GB") }
-                    TableColumn("%") { d in
-                        Text("\(d.pct) %")
-                            .foregroundColor((Int(d.pct) ?? 0) >= 90 ? colorGravedad("CRITICO")
-                                             : (Int(d.pct) ?? 0) >= 75 ? colorGravedad("AVISO") : .primary)
-                    }
-                    TableColumn("") { d in
-                        Button("Explorar") { explorando = (explorando == d.punto) ? nil : d.punto }
-                            .buttonStyle(.link)
-                    }
+                Picker("", selection: $seccion) {
+                    Text("Sugerencias de borrado").tag(0)
+                    Text("Explorar los discos").tag(1)
                 }
-                .frame(height: 132)
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
 
-                // --- Explorar por dentro ------------------------------------
-                if let raiz = explorando {
+                if seccion == 1 {
+                    // --- El arbol -------------------------------------------
+                    Text("Despliega un disco para ver que ocupa cada cosa. Cada carpeta se mide al abrirla, asi que la primera vez tarda un poco. Para borrar algo, la flecha lo abre en el Finder: desde aqui no se borra nada.")
+                        .font(.callout).foregroundColor(.secondary)
+                    ArbolEspacio(discos: m.discos)
+
+                } else {
+                    // --- Las sugerencias ------------------------------------
                     HStack {
-                        Text("Que ocupa cada cosa en \(raiz)")
+                        Text("Lo que se puede tirar sin pensarlo, medido")
                             .font(.callout).foregroundColor(.secondary)
                         Spacer()
-                        Button("Cerrar") { explorando = nil }.buttonStyle(.link)
+                        Text("marcado: \(gbMarcados(), specifier: "%.1f") GB")
+                            .font(.callout).foregroundColor(.secondary)
                     }
-                    Text("Se despliega carpeta a carpeta y cada una se mide al abrirla. Para borrar algo, la flecha lo abre en el Finder: desde aqui no se borra.")
-                        .font(.callout).foregroundColor(.secondary)
-                    VistaExplorador(raiz: raiz)
-                        .frame(minHeight: 220)
-                }
-
-                // --- Las sugerencias ----------------------------------------
-                HStack {
-                    Text("Sugerencias de borrado").font(.callout).foregroundColor(.secondary)
-                    Spacer()
-                    Text("marcado: \(gbMarcados(), specifier: "%.1f") GB")
-                        .font(.callout).foregroundColor(.secondary)
-                }
-                List {
-                    ForEach(m.sugerencias) { s in
-                        FilaSugerencia(s: s, marcada: Binding(
-                            get: { marcadas.contains(s.id) },
-                            set: { si in if si { marcadas.insert(s.id) } else { marcadas.remove(s.id) } }
-                        ))
+                    List {
+                        ForEach(m.sugerencias) { s in
+                            FilaSugerencia(s: s, marcada: Binding(
+                                get: { marcadas.contains(s.id) },
+                                set: { si in if si { marcadas.insert(s.id) } else { marcadas.remove(s.id) } }
+                            ))
+                        }
                     }
+                    .listStyle(.inset(alternatesRowBackgrounds: true))
                 }
-                .listStyle(.inset(alternatesRowBackgrounds: true))
 
             } else {
                 VStack(alignment: .leading, spacing: 6) {

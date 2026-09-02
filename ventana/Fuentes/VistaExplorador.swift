@@ -1,22 +1,27 @@
 // ---------------------------------------------------------------------------
-//  MacDiag - explorar que ocupa cada cosa dentro de un disco
+//  MacDiag - el arbol de espacio: que ocupa cada cosa, disco por disco
 //
-//  Se despliega carpeta a carpeta, y cada carpeta se mide CUANDO SE ABRE, no
-//  antes. Medir un disco entero por adelantado es recorrerlo entero: en el
-//  MacBook de las pruebas, con 187 GB ocupados, son varios minutos con el
-//  ventilador a tope, y para entonces quien lo pidio ya ha cerrado la ventana.
+//  La forma es la de PCDIAG a proposito, porque es la que Justo ya usa y
+//  reconoce: los discos son la raiz, el tamano va DELANTE del nombre y en
+//  columna -asi se comparan de un vistazo sin leer- y todo se despliega en el
+//  mismo sitio, sin cambiar de pantalla.
+//
+//  Se mide CUANDO SE ABRE una carpeta, no antes. Medir un disco entero por
+//  adelantado es recorrerlo entero: en el MacBook de las pruebas, con 187 GB
+//  ocupados, son varios minutos con el ventilador a tope, y para entonces
+//  quien lo pidio ya ha cerrado la ventana.
 //
 //  AQUI NO SE BORRA NADA, y es una decision, no algo que falte. Lo que se
 //  quiera tirar se abre en el Finder y lo tira la persona, que ve el contexto
 //  entero. Poder mandar a la papelera cualquier ruta que se pueda desplegar
 //  -incluido /System o /Library- es un poder que esta aplicacion no necesita
-//  tener para hacer su trabajo, y las cosas que no se pueden hacer no se
-//  pueden hacer por error.
+//  para hacer su trabajo, y lo que no se puede hacer no se puede hacer por
+//  error.
 //
-//  La regla de la casa aplicada aqui: una carpeta cuyo tamano NO se ha podido
-//  medir entero se dice, no se ensena la cifra corta como si fuera la buena.
-//  macOS veta por privacidad varias carpetas de ~/Library y "du" sigue sumando
-//  lo demas tan tranquilo (trampa 15).
+//  Y la regla de la casa: una carpeta cuyo tamano NO se ha podido medir entera
+//  se marca "(medido a medias)", igual que en PCDIAG. macOS veta por
+//  privacidad varias carpetas de ~/Library y "du" sigue sumando lo demas tan
+//  tranquilo (trampa 15), asi que la cifra corta parece buena si nadie avisa.
 // ---------------------------------------------------------------------------
 
 import SwiftUI
@@ -39,95 +44,89 @@ struct NivelEspacio: Codable {
     let recortada: Bool
 }
 
-/// Tamano en algo que se lea de un vistazo. En GB solo a partir de 1 GB: "0,0
-/// GB" repetido veinte veces no distingue nada, que es justo lo contrario de
-/// para lo que sirve esta pantalla.
-func tamanoLegible(_ kb: Int) -> String {
-    if kb >= 1024 * 1024 { return String(format: "%.1f GB", Double(kb) / 1024.0 / 1024.0) }
-    if kb >= 1024        { return String(format: "%.0f MB", Double(kb) / 1024.0) }
-    return "\(kb) KB"
+/// Siempre en GB y con dos decimales, como PCDIAG. Cambiar de unidad segun el
+/// tamano -MB aqui, GB alla- hace mas legible cada linea suelta y arruina lo
+/// unico que importa en una lista asi: poder comparar la columna de un
+/// vistazo sin leer las unidades.
+func gbTexto(_ kb: Int) -> String {
+    String(format: "%.2f GB", Double(kb) / 1024.0 / 1024.0)
 }
 
-struct VistaExplorador: View {
-    let raiz: String
-    @State private var nivel: NivelEspacio?
-    @State private var cargando = true
+/// El apunte de lo que no se ha podido medir. Va pegado a la fila, no en una
+/// nota al pie: quien mira una cifra tiene que ver ahi mismo si esta entera.
+func apunteEstado(_ n: NivelEspacio) -> String {
+    switch n.estado {
+    case "parcial":    return "(medido a medias: \(n.vetadas) carpeta(s) que macOS no deja mirar)"
+    case "sin-tiempo": return "(medido a medias: se acabo el minuto de limite)"
+    case "no-existe":  return "(ya no esta)"
+    default:           return n.recortada ? "(las 300 mas grandes de \(n.cuantas))" : ""
+    }
+}
+
+// ---------------------------------------------------------------------------
+//  El arbol entero: los discos son la raiz
+// ---------------------------------------------------------------------------
+struct ArbolEspacio: View {
+    let discos: [Disco]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if cargando {
-                HStack(spacing: 6) {
-                    ProgressView().controlSize(.small)
-                    Text("Midiendo \(raiz)…").font(.callout).foregroundColor(.secondary)
-                }
-            } else if let n = nivel {
-                AvisoNivel(n: n)
-                List {
-                    ForEach(n.entradas) { e in
-                        FilaExplorador(entrada: e, mayor: n.entradas.first?.kb ?? 1)
-                    }
-                }
-                .listStyle(.inset(alternatesRowBackgrounds: true))
-            } else {
-                Text("No se ha podido mirar dentro de \(raiz).")
-                    .foregroundColor(.secondary)
+        List {
+            ForEach(discos) { d in
+                FilaDisco(disco: d)
             }
         }
-        .onAppear { cargar() }
+        .listStyle(.inset(alternatesRowBackgrounds: true))
+        .font(.callout)
+    }
+}
+
+struct FilaDisco: View {
+    let disco: Disco
+    @State private var abierto = false
+    @State private var nivel: NivelEspacio?
+    @State private var cargando = false
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $abierto) {
+            CuerpoNivel(nivel: nivel, cargando: cargando)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: disco.tipo == "externo" ? "externaldrive" : "internaldrive")
+                    .foregroundColor(.secondary)
+                Text(disco.nombre).bold()
+                Text("·").foregroundColor(.secondary)
+                Text("\(disco.pct) % ocupado, \(disco.libre_gb) GB libres de \(disco.total_gb) GB")
+                    .foregroundColor((Int(disco.pct) ?? 0) >= 90 ? colorGravedad("CRITICO")
+                                     : (Int(disco.pct) ?? 0) >= 75 ? colorGravedad("AVISO") : .secondary)
+                if let n = nivel, !apunteEstado(n).isEmpty {
+                    Text(apunteEstado(n)).foregroundColor(colorGravedad("AVISO"))
+                }
+                Spacer()
+                BotonFinder(ruta: disco.punto)
+            }
+            // Doble clic en cualquier nivel abre el Finder ahi mismo. El
+            // contentShape hace que valga toda la fila y no solo las letras.
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) { abrirEnFinder(disco.punto) }
+        }
+        .onChange(of: abierto) { ahora in
+            if ahora && nivel == nil && !cargando { cargar() }
+        }
     }
 
     private func cargar() {
         cargando = true
-        Motor.preguntar("macdiag-espacio.sh", ["--ver", raiz], NivelEspacio.self) { n in
-            nivel = n
-            cargando = false
+        Motor.preguntar("macdiag-espacio.sh", ["--ver", disco.punto], NivelEspacio.self) { n in
+            nivel = n; cargando = false
         }
     }
 }
 
-/// Lo que no se ha podido medir se dice ARRIBA, antes de la lista, no en una
-/// nota al pie que nadie lee.
-struct AvisoNivel: View {
-    let n: NivelEspacio
-
-    var body: some View {
-        switch n.estado {
-        case "parcial":
-            Etiqueta(icono: "eye.slash",
-                     texto: "macOS no deja mirar dentro de \(n.vetadas) carpeta(s) por privacidad. Lo que ocupen NO esta en estas cifras: los totales son un minimo.",
-                     color: colorGravedad("AVISO"))
-        case "sin-tiempo":
-            Etiqueta(icono: "clock",
-                     texto: "Ha tardado mas de un minuto y se ha cortado. Lo que sale es lo que dio tiempo a sumar, asi que no es el total.",
-                     color: colorGravedad("AVISO"))
-        case "no-existe":
-            Etiqueta(icono: "questionmark.folder", texto: "Esa carpeta ya no esta.", color: .secondary)
-        default:
-            if n.recortada {
-                Etiqueta(icono: "list.bullet",
-                         texto: "Hay \(n.cuantas) cosas aqui dentro; se ensenan las 300 mas grandes.",
-                         color: .secondary)
-            }
-        }
-    }
-}
-
-struct Etiqueta: View {
-    let icono: String; let texto: String; let color: Color
-    var body: some View {
-        HStack(alignment: .top, spacing: 5) {
-            Image(systemName: icono).foregroundColor(color)
-            Text(texto).font(.callout).foregroundColor(.secondary)
-        }
-    }
-}
-
-/// Una fila. Si es carpeta se puede desplegar, y sus hijos se piden la primera
-/// vez que se abre y no antes.
-struct FilaExplorador: View {
+// ---------------------------------------------------------------------------
+//  Una carpeta o un fichero
+// ---------------------------------------------------------------------------
+struct FilaEspacio: View {
     let entrada: EntradaEspacio
-    let mayor: Int
-
     @State private var abierta = false
     @State private var nivel: NivelEspacio?
     @State private var cargando = false
@@ -135,78 +134,111 @@ struct FilaExplorador: View {
     var body: some View {
         if entrada.carpeta {
             DisclosureGroup(isExpanded: $abierta) {
-                if cargando {
-                    HStack(spacing: 6) {
-                        ProgressView().controlSize(.small)
-                        Text("Midiendo…").font(.callout).foregroundColor(.secondary)
-                    }
-                } else if let n = nivel {
-                    AvisoNivel(n: n)
-                    if n.entradas.isEmpty {
-                        Text("Vacia.").font(.callout).foregroundColor(.secondary)
-                    }
-                    ForEach(n.entradas) { hijo in
-                        FilaExplorador(entrada: hijo, mayor: n.entradas.first?.kb ?? 1)
-                    }
-                }
+                CuerpoNivel(nivel: nivel, cargando: cargando)
             } label: {
-                contenido
+                etiqueta
             }
             .onChange(of: abierta) { ahora in
                 if ahora && nivel == nil && !cargando { cargar() }
             }
         } else {
-            contenido
+            etiqueta
         }
     }
 
-    private var contenido: some View {
+    private var etiqueta: some View {
         HStack(spacing: 8) {
-            Image(systemName: entrada.carpeta ? "folder" : "doc")
+            // El tamano DELANTE y en columna fija: es lo que se viene a mirar,
+            // y alineado se compara sin leer.
+            Text(gbTexto(entrada.kb))
+                .font(.callout.monospacedDigit())
+                .frame(width: 76, alignment: .trailing)
+                .foregroundColor(.primary)
+
+            Image(systemName: entrada.carpeta ? "folder.fill" : "doc")
                 .foregroundColor(.secondary)
+                .font(.caption)
+
             Text(entrada.nombre)
                 .lineLimit(1)
                 .truncationMode(.middle)
-
-            Spacer(minLength: 8)
-
-            // La barra compara con el hermano mas grande, no con el disco: lo
-            // que se busca aqui es "cual de estas es la gorda".
-            GeometryReader { g in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 2).fill(Color.secondary.opacity(0.15))
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(Color.accentColor.opacity(0.55))
-                        .frame(width: max(2, g.size.width * proporcion))
-                }
-            }
-            .frame(width: 90, height: 8)
-
-            Text(tamanoLegible(entrada.kb))
-                .font(.callout.monospacedDigit())
                 .foregroundColor(.secondary)
-                .frame(width: 74, alignment: .trailing)
 
-            Button {
-                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: entrada.ruta)])
-            } label: {
-                Image(systemName: "arrow.up.forward.app")
+            if let n = nivel, !apunteEstado(n).isEmpty {
+                Text(apunteEstado(n))
+                    .font(.caption)
+                    .foregroundColor(colorGravedad("AVISO"))
             }
-            .buttonStyle(.borderless)
-            .help("Enseñarlo en el Finder. Borrar se hace ahi, no desde aqui.")
-        }
-    }
 
-    private var proporcion: Double {
-        guard mayor > 0 else { return 0 }
-        return min(1.0, Double(entrada.kb) / Double(mayor))
+            Spacer(minLength: 6)
+            BotonFinder(ruta: entrada.ruta)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { abrirEnFinder(entrada.ruta) }
     }
 
     private func cargar() {
         cargando = true
         Motor.preguntar("macdiag-espacio.sh", ["--ver", entrada.ruta], NivelEspacio.self) { n in
-            nivel = n
-            cargando = false
+            nivel = n; cargando = false
         }
+    }
+}
+
+/// Lo que cuelga de una carpeta ya abierta. Comun al disco y a las carpetas
+/// para que las dos se comporten igual, incluido lo que dicen cuando no han
+/// podido medir del todo.
+struct CuerpoNivel: View {
+    let nivel: NivelEspacio?
+    let cargando: Bool
+
+    var body: some View {
+        if cargando {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("Midiendo…").foregroundColor(.secondary)
+            }
+        } else if let n = nivel {
+            if n.entradas.isEmpty {
+                Text(n.estado == "no-existe" ? "Esa carpeta ya no esta." : "Vacia.")
+                    .foregroundColor(.secondary)
+            }
+            ForEach(n.entradas) { e in
+                FilaEspacio(entrada: e)
+            }
+        } else {
+            Text("No se ha podido mirar aqui dentro.").foregroundColor(.secondary)
+        }
+    }
+}
+
+/// Abrir en el Finder, que es el unico camino que ofrece el arbol para actuar
+/// sobre algo, y es a proposito: borrar se hace alli, viendo el contexto.
+func abrirEnFinder(_ ruta: String) {
+    let u = URL(fileURLWithPath: ruta)
+    var esCarpeta: ObjCBool = false
+    FileManager.default.fileExists(atPath: ruta, isDirectory: &esCarpeta)
+    if esCarpeta.boolValue {
+        // Una carpeta se ABRE, para quedarse dentro mirando lo que hay. Con
+        // activateFileViewerSelecting se abriria la carpeta padre con esta
+        // marcada, que no es lo que uno espera al pedir "abreme esto".
+        NSWorkspace.shared.open(u)
+    } else {
+        // Un fichero suelto no se puede "abrir" sin lanzarlo con su programa,
+        // asi que se ensena en su carpeta, marcado.
+        NSWorkspace.shared.activateFileViewerSelecting([u])
+    }
+}
+
+struct BotonFinder: View {
+    let ruta: String
+    var body: some View {
+        Button {
+            abrirEnFinder(ruta)
+        } label: {
+            Image(systemName: "arrow.up.forward.app")
+        }
+        .buttonStyle(.borderless)
+        .help("Abrirlo en el Finder (o doble clic en la fila). Para borrar algo se hace ahi, no desde aqui.")
     }
 }
